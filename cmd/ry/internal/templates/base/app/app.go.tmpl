@@ -1,0 +1,88 @@
+// Package app wires this application's dependencies together.
+//
+// There is no service container and nothing is resolved at runtime: App is a
+// plain struct, every field is set in New, and the compiler checks all of it.
+// Handlers receive *App and reach for what they need.
+package app
+
+import (
+	"fmt"
+	"log/slog"
+
+	"gorm.io/gorm"
+
+	rydb "{{.RylaModule}}/db"
+	rylog "{{.RylaModule}}/log"
+	"{{.RylaModule}}/middleware"
+	"{{.RylaModule}}/router"
+
+	"{{.Module}}/config"
+
+	// Registers the SQL driver this project was generated for.
+	_ "{{.Module}}/database"
+	// Registers every migration in database/migrations with the runner.
+	_ "{{.Module}}/database/migrations"
+)
+
+// App holds everything the application needs at runtime.
+type App struct {
+	Config *config.Config
+	Log    *slog.Logger
+	DB     *gorm.DB
+	Router *router.Router
+}
+
+// New builds the application: configuration, logging, database and the router
+// with its global middleware stack. Routes are registered separately, by main,
+// so that the routes package can import this one.
+func New() (*App, error) {
+	if err := config.LoadEnv(); err != nil {
+		return nil, fmt.Errorf("load environment: %w", err)
+	}
+	cfg := config.Load()
+
+	logger := rylog.New(rylog.Options{
+		Level:  cfg.Log.Level,
+		JSON:   cfg.Log.JSON,
+		Source: cfg.Log.Source,
+	})
+	// Make the configured logger the default too, so any library reaching for
+	// slog.Default lands in the same output stream.
+	slog.SetDefault(logger)
+
+	gdb, err := rydb.Open(rydb.Config{
+		Driver:          cfg.DB.Driver,
+		DSN:             cfg.DB.DSN,
+		MaxOpenConns:    cfg.DB.MaxOpenConns,
+		MaxIdleConns:    cfg.DB.MaxIdleConns,
+		ConnMaxLifetime: cfg.DB.ConnMaxLifetime,
+		SlowThreshold:   cfg.DB.SlowThreshold,
+		LogQueries:      cfg.DB.LogQueries,
+	}, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	r := router.New()
+	// Order matters: RequestID first so every later logger has the id;
+	// Recover last so it wraps the handler and still gets logged.
+	r.Use(middleware.RequestID)
+	r.Use(middleware.WithLogger(logger))
+	r.Use(middleware.Logger(logger))
+	r.Use(middleware.Recover(logger, cfg.Debug))
+
+	return &App{
+		Config: cfg,
+		Log:    logger,
+		DB:     gdb,
+		Router: r,
+	}, nil
+}
+
+// Close releases resources held by the application.
+func (a *App) Close() error {
+	if a.DB == nil {
+		return nil
+	}
+	return rydb.Close(a.DB)
+}

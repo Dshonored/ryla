@@ -1,0 +1,22 @@
+package controllers
+
+import (
+	"net/http"
+
+	"{{.Module}}/app"
+)
+
+// {{.Pascal}} handles {{.Kebab}} requests.
+type {{.Pascal}} struct {
+	Base
+}
+
+// New{{.Pascal}} builds the controller.
+func New{{.Pascal}}(a *app.App) *{{.Pascal}} {
+	return &{{.Pascal}}{Base{App: a}}
+}
+
+// Index handles GET /{{.KebabPlural}}.
+func (c *{{.Pascal}}) Index(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}

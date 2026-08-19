@@ -1,0 +1,14 @@
+package views
+
+templ Home(appName string) {
+	@Layout(appName) {
+		<h1>{ appName }</h1>
+		<p class="lead">Your Ryla application is running.</p>
+		<ul class="next">
+			<li><code>ry make:controller Posts</code> — add a controller</li>
+			<li><code>ry make:model Post</code> — add a model and its migration</li>
+			<li><code>ry migrate</code> — apply pending migrations</li>
+			<li>Edit <code>resources/views/home.templ</code> — this page reloads on save</li>
+		</ul>
+	}
+}

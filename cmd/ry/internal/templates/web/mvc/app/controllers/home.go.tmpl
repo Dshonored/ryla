@@ -1,0 +1,25 @@
+package controllers
+
+import (
+	"net/http"
+
+	"{{.Module}}/app"
+	"{{.Module}}/resources/views"
+)
+
+// Home serves the landing page.
+type Home struct {
+	Base
+}
+
+// NewHome builds the controller. Dependencies arrive through the App struct
+// rather than being resolved from a container, so this wiring is visible in
+// routes/web.go and checked by the compiler.
+func NewHome(a *app.App) *Home {
+	return &Home{Base{App: a}}
+}
+
+// Index handles GET /.
+func (c *Home) Index(w http.ResponseWriter, r *http.Request) {
+	c.Render(w, r, views.Home(c.App.Config.Name))
+}

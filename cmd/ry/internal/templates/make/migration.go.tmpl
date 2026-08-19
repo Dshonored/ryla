@@ -1,0 +1,23 @@
+package migrations
+
+import (
+	"gorm.io/gorm"
+
+	"{{.RylaModule}}/migrate"
+)
+
+func init() {
+	migrate.Register("{{.ID}}", up{{.Version}}, down{{.Version}})
+}
+
+func up{{.Version}}(tx *gorm.DB) error {
+	// Use tx.Migrator() to change the schema. Prefer the migrator API over raw
+	// SQL so this migration keeps working on every supported database.
+	return nil
+}
+
+func down{{.Version}}(tx *gorm.DB) error {
+	// Reverse whatever up did. A migration without a working down cannot be
+	// rolled back, which is usually discovered at the worst possible moment.
+	return nil
+}

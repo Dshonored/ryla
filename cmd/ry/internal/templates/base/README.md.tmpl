@@ -1,0 +1,49 @@
+# {{.Name}}
+
+A [Ryla](https://github.com/Dshonored/ryla) application.
+
+## Getting started
+
+```bash
+ry migrate   # create the database schema
+ry dev       # start the dev server with live reload
+```
+
+The app listens on http://localhost:8080.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `ry dev` | Watch, rebuild and restart on every save |
+| `ry build` | Compile a single static binary |
+| `ry start` | Run the compiled binary |
+| `ry migrate` | Apply pending migrations |
+| `ry migrate:rollback` | Undo the last batch of migrations |
+| `ry migrate:status` | Show which migrations have run |
+| `ry make:controller Posts` | Generate a controller |
+| `ry make:model Post` | Generate a model and its migration |
+| `ry routes` | List named routes |
+
+## Layout
+
+```
+app/            controllers, models, middleware — your code
+config/         typed configuration, read from the environment
+database/       migrations and seeders
+resources/      templ views and static assets
+routes/         the route table
+storage/        database file, logs, build scratch
+cmd/app/        the binary's entrypoint
+```
+
+## Deploying
+
+`ry build` produces one static binary with the views and static assets compiled
+in. Copy it and the `.env` file to the server; nothing else is required — no Go
+toolchain, no `ry`, and with SQLite no database server either.
+
+```bash
+./{{.Name}} migrate
+./{{.Name}} serve
+```

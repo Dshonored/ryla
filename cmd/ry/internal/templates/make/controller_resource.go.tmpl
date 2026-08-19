@@ -1,0 +1,58 @@
+package controllers
+
+import (
+	"net/http"
+
+	"{{.RylaModule}}/router"
+
+	"{{.Module}}/app"
+)
+
+// {{.Pascal}} handles {{.Kebab}} requests.
+type {{.Pascal}} struct {
+	Base
+}
+
+// New{{.Pascal}} builds the controller.
+func New{{.Pascal}}(a *app.App) *{{.Pascal}} {
+	return &{{.Pascal}}{Base{App: a}}
+}
+
+// Index handles GET /{{.KebabPlural}} — list.
+func (c *{{.Pascal}}) Index(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+// Create handles GET /{{.KebabPlural}}/create — the new-record form.
+func (c *{{.Pascal}}) Create(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+// Store handles POST /{{.KebabPlural}} — persist a new record.
+func (c *{{.Pascal}}) Store(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+// Show handles GET /{{.KebabPlural}}/{id} — a single record.
+func (c *{{.Pascal}}) Show(w http.ResponseWriter, r *http.Request) {
+	_ = router.Param(r, "id")
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+// Edit handles GET /{{.KebabPlural}}/{id}/edit — the edit form.
+func (c *{{.Pascal}}) Edit(w http.ResponseWriter, r *http.Request) {
+	_ = router.Param(r, "id")
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+// Update handles PUT /{{.KebabPlural}}/{id} — persist changes.
+func (c *{{.Pascal}}) Update(w http.ResponseWriter, r *http.Request) {
+	_ = router.Param(r, "id")
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}
+
+// Destroy handles DELETE /{{.KebabPlural}}/{id} — remove a record.
+func (c *{{.Pascal}}) Destroy(w http.ResponseWriter, r *http.Request) {
+	_ = router.Param(r, "id")
+	http.Error(w, "not implemented", http.StatusNotImplemented)
+}

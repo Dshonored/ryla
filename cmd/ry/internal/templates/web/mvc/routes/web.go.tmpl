@@ -1,0 +1,31 @@
+// Package routes declares the application's HTTP routes.
+//
+// Routes are written by hand and never rewritten by a generator, so this file
+// stays a reliable table of contents for the application. `ry make:controller`
+// prints the lines to add rather than editing this file behind your back.
+package routes
+
+import (
+	"net/http"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/controllers"
+	"{{.Module}}/resources"
+)
+
+// Register attaches every route to the application's router.
+func Register(a *app.App) {
+	home := controllers.NewHome(a)
+
+	a.Router.Static("/static", resources.Static())
+
+	a.Router.Get("/", home.Index).Name("home")
+	a.Router.Get("/up", health).Name("health")
+}
+
+// health is the liveness endpoint. Deployment tooling wants a route that
+// touches nothing, so this deliberately does not check the database.
+func health(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}

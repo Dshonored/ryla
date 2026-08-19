@@ -1,0 +1,11 @@
+# Build output
+/ry
+/ry.exe
+/dist/
+
+# Go workspace: local to each machine, points at scratch apps
+go.work
+go.work.sum
+
+# Test scratch
+/tmp/

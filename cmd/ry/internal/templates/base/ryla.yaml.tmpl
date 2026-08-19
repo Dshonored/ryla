@@ -1,0 +1,24 @@
+# Project manifest. `ry` reads this to know how to build and run the app, so it
+# never has to guess from the directory layout.
+name: {{.Name}}
+module: {{.Module}}
+
+# Database driver this project was generated for.
+database: {{.DB}}
+
+# Web mode: mvc | api | react | svelte
+web: {{.Web}}
+
+build:
+  # Package built by `ry build` and `ry dev`.
+  main: ./cmd/app
+  # Output binary, minus any platform extension.
+  output: {{.Name}}
+  # When true, `ry` runs `go tool templ generate` before every build.
+  templ: {{.UsesTempl}}
+
+dev:
+  # Extra paths the file watcher ignores, on top of the defaults.
+  ignore:
+    - storage
+    - node_modules

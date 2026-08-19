@@ -1,0 +1,13 @@
+// Package migrations holds this application's schema migrations.
+//
+// Each migration is a file that registers itself from init, so importing this
+// package is enough to make every migration known to the runner:
+//
+//	func init() {
+//	    migrate.Register("20260101000000_create_users", up, down)
+//	}
+//
+// Create one with:
+//
+//	ry make:migration create_users
+package migrations

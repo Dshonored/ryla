@@ -1,0 +1,23 @@
+# Build output
+/{{.Name}}
+/{{.Name}}.exe
+/dist/
+/tmp/
+
+# Local environment — .env.example is the file that gets committed
+.env
+.env.local
+
+# Runtime state
+/storage/*.db
+/storage/*.db-shm
+/storage/*.db-wal
+/storage/logs/
+/storage/tmp/
+
+# templ output is generated from .templ sources by `ry dev` / `ry build`
+*_templ.go
+
+# Frontend
+/node_modules/
+/resources/static/dist/

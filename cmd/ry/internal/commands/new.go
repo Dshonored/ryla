@@ -1,0 +1,341 @@
+package commands
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/charmbracelet/huh"
+	"github.com/spf13/cobra"
+
+	"github.com/Dshonored/ryla/cmd/ry/internal/naming"
+	"github.com/Dshonored/ryla/cmd/ry/internal/scaffold"
+	"github.com/Dshonored/ryla/cmd/ry/internal/templates"
+	"github.com/Dshonored/ryla/cmd/ry/internal/toolchain"
+)
+
+const rylaModule = scaffold.RylaModule
+
+func newCmd() *cobra.Command {
+	var (
+		module   string
+		database string
+		web      string
+		noPrompt bool
+		skipDeps bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "new [name]",
+		Short: "Scaffold a new Ryla application",
+		Long: strings.TrimSpace(`
+Scaffold a new Ryla application.
+
+Run with no flags to pick the database and web mode interactively; pass them
+explicitly to skip the prompts, which is what you want in scripts and CI.
+`),
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := ""
+			if len(args) == 1 {
+				name = args[0]
+			}
+
+			a := answers{Name: name, Module: module, DB: database, Web: web}
+			if noPrompt || !interactive() {
+				a.applyDefaults()
+			} else if err := a.prompt(); err != nil {
+				return err
+			}
+
+			return runNew(cmd.Context(), cmd.OutOrStdout(), a, skipDeps)
+		},
+	}
+
+	f := cmd.Flags()
+	f.StringVarP(&module, "module", "m", "", "Go module path (default: the project name)")
+	f.StringVar(&database, "db", "", "database driver: "+strings.Join(availableDatabaseNames(), ", "))
+	f.StringVar(&web, "web", "", "web mode: "+strings.Join(availableWebModeNames(), ", "))
+	f.BoolVarP(&noPrompt, "yes", "y", false, "accept defaults instead of prompting")
+	f.BoolVar(&skipDeps, "skip-deps", false, "do not resolve dependencies or generate view code")
+
+	return cmd
+}
+
+// answers is everything `ry new` needs before it can generate anything.
+type answers struct {
+	Name   string
+	Module string
+	DB     string
+	Web    string
+}
+
+func (a *answers) applyDefaults() {
+	if a.Name == "" {
+		a.Name = "myapp"
+	}
+	if a.Module == "" {
+		a.Module = naming.Kebab(a.Name)
+	}
+	if a.DB == "" {
+		a.DB = "sqlite"
+	}
+	if a.Web == "" {
+		a.Web = "mvc"
+	}
+}
+
+func (a *answers) prompt() error {
+	var groups []*huh.Group
+
+	if a.Name == "" {
+		groups = append(groups, huh.NewGroup(
+			huh.NewInput().
+				Title("Project name").
+				Placeholder("myapp").
+				Value(&a.Name).
+				Validate(validateName),
+		))
+	}
+
+	if a.DB == "" {
+		groups = append(groups, huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Database").
+				Options(databaseOptions()...).
+				Value(&a.DB).
+				Validate(func(v string) error {
+					_, err := scaffold.LookupDatabase(v)
+					return err
+				}),
+		))
+	}
+
+	if a.Web == "" {
+		groups = append(groups, huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Web mode").
+				Options(webModeOptions()...).
+				Value(&a.Web).
+				Validate(func(v string) error {
+					_, err := scaffold.LookupWebMode(v)
+					return err
+				}),
+		))
+	}
+
+	if len(groups) > 0 {
+		if err := runForm(huh.NewForm(groups...)); err != nil {
+			return err
+		}
+	}
+
+	if a.Module == "" {
+		a.Module = naming.Kebab(a.Name)
+		form := huh.NewForm(huh.NewGroup(
+			huh.NewInput().
+				Title("Module path").
+				Description("Where this code will live, for example github.com/you/" + naming.Kebab(a.Name)).
+				Value(&a.Module),
+		))
+		if err := runForm(form); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runForm(form *huh.Form) error {
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			return errors.New("cancelled")
+		}
+		return err
+	}
+	return nil
+}
+
+func runNew(ctx context.Context, out io.Writer, a answers, skipDeps bool) error {
+	if err := validateName(a.Name); err != nil {
+		return err
+	}
+	if !toolchain.HasGo() {
+		return errors.New("the Go toolchain is not on PATH; install Go and try again")
+	}
+
+	dest, err := filepath.Abs(naming.Kebab(a.Name))
+	if err != nil {
+		return err
+	}
+	if err := checkDestination(dest); err != nil {
+		return err
+	}
+
+	frameworkVersion := Version()
+	local := ""
+	if IsDevVersion() {
+		local = frameworkPath()
+		if local == "" {
+			return fmt.Errorf(
+				"this is an untagged development build of ry, so a generated project cannot fetch %s from the module proxy.\n"+
+					"Set RYLA_PATH to your local framework checkout, or install a tagged release",
+				rylaModule)
+		}
+	}
+
+	proj, err := scaffold.NewProject(a.Name, a.Module, a.DB, a.Web, frameworkVersion, toolchain.GoVersion(ctx))
+	if err != nil {
+		return err
+	}
+
+	gen := &scaffold.Generator{
+		FS:       templates.FS,
+		Overlays: proj.Overlays(),
+		Dest:     dest,
+		Data:     proj,
+	}
+	files, err := gen.Run()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "Created %s (%d files)\n", relativeToWD(dest), len(files))
+
+	if err := wireModule(ctx, dest, local, frameworkVersion); err != nil {
+		return err
+	}
+
+	if skipDeps {
+		fmt.Fprintln(out, "\nSkipped dependency resolution. Run `go mod tidy` before building.")
+		printNextSteps(out, proj.Name, dest)
+		return nil
+	}
+
+	if proj.UsesTempl {
+		fmt.Fprintln(out, "Installing the templ tool...")
+		if err := toolchain.Quiet(ctx, dest, "go", "get", "-tool", "github.com/a-h/templ/cmd/templ"); err != nil {
+			return err
+		}
+
+		// Views are generated before `go mod tidy` on purpose: until templ has
+		// run, the views package contains no Go files at all, and tidy cannot
+		// resolve the controllers that import it.
+		fmt.Fprintln(out, "Generating views...")
+		if err := toolchain.Quiet(ctx, dest, "go", "tool", "templ", "generate"); err != nil {
+			return err
+		}
+	}
+
+	fmt.Fprintln(out, "Resolving dependencies...")
+	if err := toolchain.Quiet(ctx, dest, "go", "mod", "tidy"); err != nil {
+		return err
+	}
+
+	printNextSteps(out, proj.Name, dest)
+	return nil
+}
+
+// wireModule points the new project's go.mod at the framework: at a published
+// version normally, or at a local checkout when ry itself is an untagged build.
+func wireModule(ctx context.Context, dest, local, version string) error {
+	if local != "" {
+		return toolchain.Quiet(ctx, dest, "go", "mod", "edit",
+			"-replace="+rylaModule+"="+local,
+			"-require="+rylaModule+"@v0.0.0",
+		)
+	}
+	return toolchain.Quiet(ctx, dest, "go", "mod", "edit", "-require="+rylaModule+"@"+version)
+}
+
+func printNextSteps(out io.Writer, name, dest string) {
+	fmt.Fprintf(out, "\n%s is ready.\n\n  cd %s\n  ry migrate\n  ry dev\n\nThen open http://localhost:8080\n",
+		name, relativeToWD(dest))
+}
+
+func checkDestination(dest string) error {
+	entries, err := os.ReadDir(dest)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if len(entries) > 0 {
+		return fmt.Errorf("%s already exists and is not empty", relativeToWD(dest))
+	}
+	return nil
+}
+
+func validateName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return errors.New("a project name is required")
+	}
+	if strings.ContainsAny(name, "/\\:*?\"<>|") {
+		return fmt.Errorf("invalid project name %q", name)
+	}
+	return nil
+}
+
+// databaseOptions lists every database, including the ones not built yet. They
+// stay visible so the intended shape of the menu is obvious rather than the
+// framework quietly pretending SQLite is the only option there will ever be.
+func databaseOptions() []huh.Option[string] {
+	opts := make([]huh.Option[string], 0, len(scaffold.Databases()))
+	for _, d := range scaffold.Databases() {
+		opts = append(opts, huh.NewOption(d.Name+" — "+d.Summary, d.Name))
+	}
+	return opts
+}
+
+func webModeOptions() []huh.Option[string] {
+	opts := make([]huh.Option[string], 0, len(scaffold.WebModes()))
+	for _, w := range scaffold.WebModes() {
+		opts = append(opts, huh.NewOption(w.Name+" — "+w.Summary, w.Name))
+	}
+	return opts
+}
+
+func availableDatabaseNames() []string {
+	var out []string
+	for _, d := range scaffold.Databases() {
+		if d.Available {
+			out = append(out, d.Name)
+		}
+	}
+	return out
+}
+
+func availableWebModeNames() []string {
+	var out []string
+	for _, w := range scaffold.WebModes() {
+		if w.Available {
+			out = append(out, w.Name)
+		}
+	}
+	return out
+}
+
+// interactive reports whether stdin is a terminal, so `ry new` in a script or
+// in CI falls back to defaults instead of hanging on a prompt nobody can see.
+func interactive() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+func relativeToWD(path string) string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return path
+	}
+	rel, err := filepath.Rel(wd, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return path
+	}
+	return rel
+}

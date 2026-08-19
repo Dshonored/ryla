@@ -1,0 +1,75 @@
+// Package config declares this application's settings.
+//
+// Everything is read explicitly rather than reflected out of struct tags, so
+// every setting, its environment variable and its default are visible in one
+// place and checked by the compiler.
+package config
+
+import (
+	"time"
+
+	ryconfig "{{.RylaModule}}/config"
+
+	"{{.Module}}/database"
+)
+
+// Config is the whole application's configuration.
+type Config struct {
+	ryconfig.Core
+
+	DB  Database
+	Log Log
+}
+
+// Database describes the SQL connection.
+type Database struct {
+	Driver          string
+	DSN             string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	SlowThreshold   time.Duration
+	LogQueries      bool
+}
+
+// Log describes logger output.
+type Log struct {
+	Level  string
+	JSON   bool
+	Source bool
+}
+
+// LoadEnv reads .env files into the process environment. Real environment
+// variables always win over file contents.
+func LoadEnv(paths ...string) error { return ryconfig.Load(paths...) }
+
+// Load builds the configuration from the environment.
+func Load() *Config {
+	env := ryconfig.String("APP_ENV", ryconfig.EnvLocal)
+	production := env == ryconfig.EnvProduction
+
+	return &Config{
+		Core: ryconfig.Core{
+			Name:  ryconfig.String("APP_NAME", "{{.Name}}"),
+			Env:   env,
+			Debug: ryconfig.Bool("APP_DEBUG", !production),
+			URL:   ryconfig.String("APP_URL", "http://localhost:8080"),
+			Addr:  ryconfig.String("APP_ADDR", ":8080"),
+			Key:   ryconfig.String("APP_KEY", ""),
+		},
+		DB: Database{
+			Driver:          ryconfig.String("DB_DRIVER", database.Driver),
+			DSN:             ryconfig.String("DB_DSN", database.DefaultDSN),
+			MaxOpenConns:    ryconfig.Int("DB_MAX_OPEN_CONNS", {{.DBMaxOpenConns}}),
+			MaxIdleConns:    ryconfig.Int("DB_MAX_IDLE_CONNS", 2),
+			ConnMaxLifetime: ryconfig.Duration("DB_CONN_MAX_LIFETIME", time.Hour),
+			SlowThreshold:   ryconfig.Duration("DB_SLOW_THRESHOLD", 200*time.Millisecond),
+			LogQueries:      ryconfig.Bool("DB_LOG_QUERIES", false),
+		},
+		Log: Log{
+			Level:  ryconfig.String("LOG_LEVEL", "info"),
+			JSON:   ryconfig.Bool("LOG_JSON", production),
+			Source: ryconfig.Bool("LOG_SOURCE", false),
+		},
+	}
+}

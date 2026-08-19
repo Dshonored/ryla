@@ -1,0 +1,15 @@
+# Force LF everywhere, in the repository and in the working tree.
+#
+# This is not a style preference. Project templates are rendered verbatim into
+# generated projects, so a template checked out with CRLF produces CRLF Go
+# source, and every generated file then fails gofmt. On Windows, core.autocrlf
+# is commonly on and would do exactly that to a fresh clone.
+* text=auto eol=lf
+
+# Binaries git must never touch.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

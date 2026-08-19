@@ -1,0 +1,25 @@
+// Package resources embeds the application's static assets into the binary.
+//
+// This is what keeps `ry build` honest: the deployed artifact is one file, with
+// no assets directory to copy alongside it.
+package resources
+
+import (
+	"embed"
+	"io/fs"
+)
+
+//go:embed static
+var staticFS embed.FS
+
+// Static returns the embedded static asset tree, rooted so that
+// static/app.css is served at /static/app.css.
+func Static() fs.FS {
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		// Only reachable if the embed directive and this path disagree, which
+		// is a build-time mistake rather than a runtime condition.
+		panic(err)
+	}
+	return sub
+}

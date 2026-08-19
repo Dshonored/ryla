@@ -1,0 +1,12 @@
+package seeders
+
+import (
+	"context"
+
+	"gorm.io/gorm"
+)
+
+// seed{{.Pascal}} inserts {{.KebabPlural}}. Add it to the list in Run.
+func seed{{.Pascal}}(ctx context.Context, db *gorm.DB) error {
+	return nil
+}
