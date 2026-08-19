@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -18,7 +19,7 @@ import (
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	dsn := "file:" + t.Name() + "?mode=memory&cache=shared"
+	dsn := uniqueDSN(t)
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: gormlogger.Discard})
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
@@ -402,4 +403,16 @@ func TestDefaultBackoffGrowsAndIsCapped(t *testing.T) {
 	if got := DefaultBackoff(1000); got != 10*time.Minute {
 		t.Errorf("DefaultBackoff(1000) = %v, want the 10m ceiling", got)
 	}
+}
+
+// dbCounter makes every in-memory database unique.
+//
+// cache=shared means a DSN names one database for the whole process, so reusing
+// the test's name reuses its data. That is invisible on a single run and breaks
+// immediately under `go test -count=2`, where the second iteration inherits
+// whatever the first left behind.
+var dbCounter atomic.Int64
+
+func uniqueDSN(t *testing.T) string {
+	return fmt.Sprintf("file:%s-%d?mode=memory&cache=shared", t.Name(), dbCounter.Add(1))
 }

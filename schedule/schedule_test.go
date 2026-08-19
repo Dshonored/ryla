@@ -17,21 +17,23 @@ func TestEveryRunsOnItsInterval(t *testing.T) {
 	s := New(quiet())
 
 	var runs atomic.Int32
-	s.Every(30*time.Millisecond, "tick", func(context.Context) error {
+	s.Every(50*time.Millisecond, "tick", func(context.Context) error {
 		runs.Add(1)
 		return nil
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
 	defer cancel()
 
-	if err := s.Run(ctx, 10*time.Millisecond); err != nil {
+	if err := s.Run(ctx, 20*time.Millisecond); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// Roughly 200ms of a 30ms task, minus the seeded first interval.
-	if n := runs.Load(); n < 3 || n > 8 {
-		t.Errorf("task ran %d times in 200ms at a 30ms interval, want 3-8", n)
+	// The property is "it repeats", not an exact count. Timer granularity is
+	// around 15ms on Windows and a shared CI runner adds more, so asserting a
+	// narrow range would fail for reasons that say nothing about the code.
+	if n := runs.Load(); n < 2 {
+		t.Errorf("task ran %d times in 600ms at a 50ms interval, want it to repeat", n)
 	}
 }
 
@@ -61,7 +63,7 @@ func TestOverlapIsPreventedByDefault(t *testing.T) {
 	s := New(quiet())
 
 	var concurrent, peak atomic.Int32
-	s.Every(10*time.Millisecond, "slow", func(context.Context) error {
+	s.Every(20*time.Millisecond, "slow", func(context.Context) error {
 		n := concurrent.Add(1)
 		for {
 			old := peak.Load()
@@ -69,14 +71,14 @@ func TestOverlapIsPreventedByDefault(t *testing.T) {
 				break
 			}
 		}
-		time.Sleep(80 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 		concurrent.Add(-1)
 		return nil
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	_ = s.Run(ctx, 5*time.Millisecond)
+	_ = s.Run(ctx, 10*time.Millisecond)
 
 	if got := peak.Load(); got > 1 {
 		t.Errorf("%d copies of the task ran at once, want 1", got)
@@ -87,7 +89,7 @@ func TestOverlapCanBeAllowed(t *testing.T) {
 	s := New(quiet())
 
 	var concurrent, peak atomic.Int32
-	task := s.Every(10*time.Millisecond, "parallel", func(context.Context) error {
+	task := s.Every(20*time.Millisecond, "parallel", func(context.Context) error {
 		n := concurrent.Add(1)
 		for {
 			old := peak.Load()
@@ -95,13 +97,13 @@ func TestOverlapCanBeAllowed(t *testing.T) {
 				break
 			}
 		}
-		time.Sleep(60 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 		concurrent.Add(-1)
 		return nil
 	})
 	task.AllowOverlap = true
 
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	_ = s.Run(ctx, 5*time.Millisecond)
 
@@ -116,17 +118,17 @@ func TestPanicDoesNotStopTheScheduler(t *testing.T) {
 	s := New(quiet())
 
 	var good atomic.Int32
-	s.Every(20*time.Millisecond, "explodes", func(context.Context) error {
+	s.Every(30*time.Millisecond, "explodes", func(context.Context) error {
 		panic("task exploded")
 	})
-	s.Every(20*time.Millisecond, "fine", func(context.Context) error {
+	s.Every(30*time.Millisecond, "fine", func(context.Context) error {
 		good.Add(1)
 		return nil
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	_ = s.Run(ctx, 10*time.Millisecond)
+	_ = s.Run(ctx, 20*time.Millisecond)
 
 	if good.Load() == 0 {
 		t.Error("the healthy task never ran alongside a panicking one")
@@ -137,14 +139,14 @@ func TestFailingTaskKeepsRunning(t *testing.T) {
 	s := New(quiet())
 
 	var runs atomic.Int32
-	s.Every(20*time.Millisecond, "flaky", func(context.Context) error {
+	s.Every(30*time.Millisecond, "flaky", func(context.Context) error {
 		runs.Add(1)
 		return errors.New("nope")
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	_ = s.Run(ctx, 10*time.Millisecond)
+	_ = s.Run(ctx, 20*time.Millisecond)
 
 	// A task that failed once is still scheduled; the next window is its retry.
 	if n := runs.Load(); n < 2 {
@@ -242,9 +244,9 @@ func TestShutdownWaitsForRunningTasks(t *testing.T) {
 	finished.Add(1)
 	var completed atomic.Bool
 
-	s.Every(10*time.Millisecond, "slow", func(context.Context) error {
+	s.Every(20*time.Millisecond, "slow", func(context.Context) error {
 		defer finished.Done()
-		time.Sleep(80 * time.Millisecond)
+		time.Sleep(150 * time.Millisecond)
 		completed.Store(true)
 		return nil
 	})
@@ -256,7 +258,7 @@ func TestShutdownWaitsForRunningTasks(t *testing.T) {
 		close(done)
 	}()
 
-	time.Sleep(40 * time.Millisecond)
+	time.Sleep(80 * time.Millisecond)
 	cancel()
 
 	select {

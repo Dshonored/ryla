@@ -3,8 +3,10 @@ package migrate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -16,7 +18,7 @@ func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	// A file-scoped shared-cache in-memory database, unique per test, so the
 	// connection pool sees one database rather than one per connection.
-	dsn := "file:" + t.Name() + "?mode=memory&cache=shared"
+	dsn := uniqueDSN(t)
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: gormlogger.Discard})
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
@@ -199,4 +201,16 @@ func TestDuplicateRegistrationPanics(t *testing.T) {
 	up := func(tx *gorm.DB) error { return nil }
 	Register("20260101000000_a", up, nil)
 	Register("20260101000000_a", up, nil)
+}
+
+// dbCounter makes every in-memory database unique.
+//
+// cache=shared means a DSN names one database for the whole process, so reusing
+// the test's name reuses its data. That is invisible on a single run and breaks
+// immediately under `go test -count=2`, where the second iteration inherits
+// whatever the first left behind.
+var dbCounter atomic.Int64
+
+func uniqueDSN(t *testing.T) string {
+	return fmt.Sprintf("file:%s-%d?mode=memory&cache=shared", t.Name(), dbCounter.Add(1))
 }

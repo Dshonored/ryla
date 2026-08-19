@@ -18,7 +18,7 @@ import (
 func stores(t *testing.T) map[string]Store {
 	t.Helper()
 
-	dsn := "file:" + t.Name() + "?mode=memory&cache=shared"
+	dsn := uniqueDSN(t)
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: gormlogger.Discard})
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
@@ -74,16 +74,25 @@ func TestExpiry(t *testing.T) {
 
 	for name, s := range stores(t) {
 		t.Run(name, func(t *testing.T) {
-			if err := s.Set(ctx, "k", []byte("v"), 40*time.Millisecond); err != nil {
+			// The two halves use separate keys and very different lifetimes on
+			// purpose. Setting one short TTL and asserting both "still here"
+			// and "now gone" against it races the clock: on a loaded machine
+			// the write and the read alone can outlast a few tens of
+			// milliseconds, and the first assertion fails for reasons that have
+			// nothing to do with expiry.
+			if err := s.Set(ctx, "long", []byte("v"), time.Hour); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok, _ := s.Get(ctx, "k"); !ok {
-				t.Fatal("the value was missing before it expired")
+			if _, ok, _ := s.Get(ctx, "long"); !ok {
+				t.Error("a value with an hour to live was already gone")
 			}
 
-			time.Sleep(70 * time.Millisecond)
+			if err := s.Set(ctx, "short", []byte("v"), 20*time.Millisecond); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(100 * time.Millisecond)
 
-			if _, ok, _ := s.Get(ctx, "k"); ok {
+			if _, ok, _ := s.Get(ctx, "short"); ok {
 				t.Error("an expired value was returned")
 			}
 		})
@@ -372,4 +381,16 @@ func TestDBPrune(t *testing.T) {
 	if _, ok, _ := s.Get(ctx, "stays"); !ok {
 		t.Error("Prune removed a live entry")
 	}
+}
+
+// dbCounter makes every in-memory database unique.
+//
+// cache=shared means a DSN names one database for the whole process, so reusing
+// the test's name reuses its data. That is invisible on a single run and breaks
+// immediately under `go test -count=2`, where the second iteration inherits
+// whatever the first left behind.
+var dbCounter atomic.Int64
+
+func uniqueDSN(t *testing.T) string {
+	return fmt.Sprintf("file:%s-%d?mode=memory&cache=shared", t.Name(), dbCounter.Add(1))
 }
