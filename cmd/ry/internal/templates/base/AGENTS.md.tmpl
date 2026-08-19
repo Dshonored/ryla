@@ -154,6 +154,16 @@ no longer exists fails to compile. Run with `ry schedule:run`, or
 `schedule:run --once` from a system cron. Tasks do not overlap by default: one
 slower than its interval would otherwise pile up copies of itself.
 
+**Redis is optional and opt-in.** Set CACHE_DRIVER, SESSION_DRIVER or
+QUEUE_DRIVER to `redis` and it is connected once at start-up and shared; leave
+them alone and the connection is never opened. Switching is a config change, not
+a regeneration.
+
+Pick per service rather than all at once. The database queue ties a job's
+durability to the database that queued it; Redis handles far more throughput but
+its durability is Redis's. Sessions and cache in Redis are almost always the
+right call once the app runs as more than one process.
+
 **APP_KEY signs cookies.** CSRF tokens, flash messages and sessions all depend
 on it. It is generated per project; the app refuses to start in production
 without one. Rotate with `ry key:generate --force`, which logs everyone out.

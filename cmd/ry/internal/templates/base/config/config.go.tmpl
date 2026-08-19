@@ -22,6 +22,27 @@ type Config struct {
 	Session Session
 	Mail    Mail
 	Cache   Cache
+	Redis   Redis
+	Queue   Queue
+}
+
+// Redis is optional. It is opened only when one of the drivers below asks for
+// it, so an application that does not use it never connects.
+type Redis struct {
+	URL      string
+	Addr     string
+	Username string
+	Password string
+	DB       int
+	Prefix   string
+}
+
+// Queue describes where background jobs are kept.
+type Queue struct {
+	// Driver is db or redis. The database driver ties a job's durability to the
+	// database transaction that queued it; Redis handles far more throughput
+	// but its durability is Redis's.
+	Driver string
 }
 
 // Cache describes where computed values are kept.
@@ -54,6 +75,9 @@ type Mail struct {
 
 // Session describes how visitor state is stored.
 type Session struct {
+	// Driver is db, redis or cookie. Only cookie cannot be revoked, which is
+	// why it is not the default once anything signs in.
+	Driver   string
 	Lifetime time.Duration
 }
 
@@ -103,7 +127,19 @@ func Load() *Config {
 			LogQueries:      ryconfig.Bool("DB_LOG_QUERIES", false),
 		},
 		Session: Session{
+			Driver:   ryconfig.String("SESSION_DRIVER", "db"),
 			Lifetime: ryconfig.Duration("SESSION_LIFETIME", 14*24*time.Hour),
+		},
+		Redis: Redis{
+			URL:      ryconfig.String("REDIS_URL", ""),
+			Addr:     ryconfig.String("REDIS_ADDR", "localhost:6379"),
+			Username: ryconfig.String("REDIS_USERNAME", ""),
+			Password: ryconfig.String("REDIS_PASSWORD", ""),
+			DB:       ryconfig.Int("REDIS_DB", 0),
+			Prefix:   ryconfig.String("REDIS_PREFIX", "{{.Name}}"),
+		},
+		Queue: Queue{
+			Driver: ryconfig.String("QUEUE_DRIVER", "db"),
 		},
 		Cache: Cache{
 			Driver: ryconfig.String("CACHE_DRIVER", "memory"),
@@ -138,4 +174,11 @@ func defaultMailDriver(env string) string {
 		return "smtp"
 	}
 	return "log"
+}
+
+// UsesRedis reports whether any driver needs a Redis connection.
+func (c *Config) UsesRedis() bool {
+	return c.Cache.Driver == "redis" ||
+		c.Session.Driver == "redis" ||
+		c.Queue.Driver == "redis"
 }

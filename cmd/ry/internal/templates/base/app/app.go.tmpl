@@ -6,6 +6,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,8 +15,11 @@ import (
 
 	"gorm.io/gorm"
 
+	goredis "github.com/redis/go-redis/v9"
+
 	"{{.RylaModule}}/auth"
 	"{{.RylaModule}}/cache"
+	cacheredis "{{.RylaModule}}/cache/redis"
 	"{{.RylaModule}}/cookie"
 	"{{.RylaModule}}/csrf"
 	rydb "{{.RylaModule}}/db"
@@ -24,9 +28,12 @@ import (
 	"{{.RylaModule}}/mail"
 	"{{.RylaModule}}/middleware"
 	"{{.RylaModule}}/queue"
+	queueredis "{{.RylaModule}}/queue/redis"
+	ryredis "{{.RylaModule}}/redis"
 	"{{.RylaModule}}/router"
 	"{{.RylaModule}}/schedule"
 	"{{.RylaModule}}/session"
+	sessionredis "{{.RylaModule}}/session/redis"
 
 	"{{.Module}}/config"
 
@@ -61,6 +68,14 @@ type App struct {
 	// happens outside this package: app/schedule needs the App, so this package
 	// cannot import it back without a cycle.
 	Scheduler *schedule.Scheduler
+
+	// Redis is nil unless a driver asked for it.
+	Redis *goredis.Client
+
+	// QueueDriver is where jobs are stored. The worker commands read it, so
+	// that dispatching and draining can never disagree about which backend is
+	// in use.
+	QueueDriver queue.Driver
 }
 
 // New builds the application: configuration, logging, database, cookies and the
@@ -104,11 +119,24 @@ func New() (*App, error) {
 	// scheme keeps local development working without weakening production.
 	jar := cookie.New(key, strings.HasPrefix(cfg.URL, "https://"))
 
-	// Sessions are stored in the database rather than the cookie so they can be
-	// revoked: deleting the row ends the session immediately, however many
-	// browsers hold the cookie. "Log out everywhere" and "log out on password
-	// change" both depend on that.
-	sessions := session.NewDBStore(gdb, jar, cfg.Session.Lifetime)
+	// Redis is opened once and shared by whichever drivers asked for it. An
+	// application using none of them never connects, and never pays for a
+	// dependency it does not use.
+	var rdb *goredis.Client
+	if cfg.UsesRedis() {
+		rdb, err = ryredis.Open(context.Background(), ryredis.Config{
+			URL:      cfg.Redis.URL,
+			Addr:     cfg.Redis.Addr,
+			Username: cfg.Redis.Username,
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.DB,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	sessions := buildSessions(cfg, gdb, rdb, jar)
 
 	r := router.New()
 	// Order matters: RequestID first so every later logger has the id; Recover
@@ -129,7 +157,8 @@ func New() (*App, error) {
 		},
 	}))
 
-	dispatcher := queue.NewDispatcher(queue.NewDBDriver(gdb))
+	queueDriver := buildQueueDriver(cfg, gdb, rdb)
+	dispatcher := queue.NewDispatcher(queueDriver)
 
 	// The queued mailer hands messages to a worker; the underlying one does the
 	// delivering. Both are needed: the worker rebuilds the job from JSON and
@@ -154,18 +183,49 @@ func New() (*App, error) {
 		Queue:   dispatcher,
 		Mail:    mailer,
 		Signer:  auth.NewSigner(key),
-		Cache:   buildCache(cfg, gdb),
+		Cache:   buildCache(cfg, gdb, rdb),
+		Redis:   rdb,
+
+		QueueDriver: queueDriver,
 
 		Scheduler: schedule.New(logger),
 	}, nil
 }
 
 // buildCache picks the cache store from configuration.
-func buildCache(cfg *config.Config, gdb *gorm.DB) cache.Store {
-	if cfg.Cache.Driver == "db" {
+func buildCache(cfg *config.Config, gdb *gorm.DB, rdb *goredis.Client) cache.Store {
+	switch cfg.Cache.Driver {
+	case "redis":
+		return cacheredis.New(rdb, cfg.Redis.Prefix+":cache")
+	case "db":
 		return cache.NewDB(gdb)
+	default:
+		return cache.NewMemory()
 	}
-	return cache.NewMemory()
+}
+
+// buildSessions picks the session store from configuration.
+//
+// The cookie store is offered but is not the default: it keeps everything in
+// the browser, so a session cannot be revoked, and "log out everywhere" and
+// "log out on password change" both become impossible.
+func buildSessions(cfg *config.Config, gdb *gorm.DB, rdb *goredis.Client, jar *cookie.Jar) session.Store {
+	switch cfg.Session.Driver {
+	case "redis":
+		return sessionredis.New(rdb, jar, cfg.Session.Lifetime, cfg.Redis.Prefix+":session")
+	case "cookie":
+		return session.NewCookieStore(jar, cfg.Session.Lifetime)
+	default:
+		return session.NewDBStore(gdb, jar, cfg.Session.Lifetime)
+	}
+}
+
+// buildQueueDriver picks where background jobs are kept.
+func buildQueueDriver(cfg *config.Config, gdb *gorm.DB, rdb *goredis.Client) queue.Driver {
+	if cfg.Queue.Driver == "redis" {
+		return queueredis.New(rdb, cfg.Redis.Prefix+":queue")
+	}
+	return queue.NewDBDriver(gdb)
 }
 
 // buildMailer picks the delivery mechanism from configuration.

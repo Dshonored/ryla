@@ -134,7 +134,10 @@ func (a *App) queueWork(ctx context.Context, args []string) error {
 	}
 
 	w := &queue.Worker{
-		Driver:       queue.NewDBDriver(a.DB),
+		// The configured driver, not a hardcoded one: dispatching to Redis
+		// while draining the database means jobs simply never run, and
+		// nothing says so.
+		Driver:       a.QueueDriver,
 		Log:          a.Log,
 		Queue:        *name,
 		Concurrency:  *concurrency,
@@ -152,7 +155,12 @@ func (a *App) queueFailed(ctx context.Context, args []string) error {
 		return err
 	}
 
-	failed, err := queue.NewDBDriver(a.DB).Failed(ctx, *limit)
+	lister, ok := a.QueueDriver.(queue.FailedLister)
+	if !ok {
+		return errors.New("the configured queue driver does not keep failed jobs")
+	}
+
+	failed, err := lister.Failed(ctx, *limit)
 	if err != nil {
 		return err
 	}
@@ -176,13 +184,17 @@ func (a *App) queueRetry(ctx context.Context, args []string) error {
 		return errors.New("usage: queue:retry <id> [id...]")
 	}
 
-	driver := queue.NewDBDriver(a.DB)
+	retrier, ok := a.QueueDriver.(queue.Retrier)
+	if !ok {
+		return errors.New("the configured queue driver cannot retry failed jobs")
+	}
+
 	for _, raw := range args {
 		id, err := strconv.ParseUint(raw, 10, 64)
 		if err != nil {
 			return fmt.Errorf("%q is not a job id", raw)
 		}
-		if err := driver.Retry(ctx, uint(id)); err != nil {
+		if err := retrier.Retry(ctx, uint(id)); err != nil {
 			return fmt.Errorf("retry %d: %w", id, err)
 		}
 		fmt.Printf("Job %d is back on its queue.\n", id)

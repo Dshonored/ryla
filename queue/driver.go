@@ -124,3 +124,15 @@ func decode(rec *Record) (Job, error) {
 	}
 	return job, nil
 }
+
+// FailedLister is implemented by drivers that keep failed jobs. Both shipped
+// drivers do; the interface exists so the app's commands can work with
+// whichever one is configured rather than assuming the database.
+type FailedLister interface {
+	Failed(ctx context.Context, limit int) ([]FailedRecord, error)
+}
+
+// Retrier is implemented by drivers that can put a failed job back.
+type Retrier interface {
+	Retry(ctx context.Context, id uint) error
+}
