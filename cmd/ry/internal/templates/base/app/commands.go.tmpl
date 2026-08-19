@@ -2,14 +2,18 @@ package app
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
 	ryapp "{{.RylaModule}}/app"
 	"{{.RylaModule}}/migrate"
+	"{{.RylaModule}}/queue"
 
 	"{{.Module}}/database/seeders"
 )
@@ -26,6 +30,9 @@ func (a *App) Commands() ryapp.Commands {
 		{Name: "migrate:refresh", Usage: "Roll everything back, then migrate again", Run: a.migrateRefresh},
 		{Name: "db:seed", Usage: "Run the database seeders", Run: a.dbSeed},
 		{Name: "routes", Usage: "List the application's named routes", Run: a.routes},
+		{Name: "queue:work", Usage: "Run background jobs until interrupted", Run: a.queueWork},
+		{Name: "queue:failed", Usage: "List jobs that exhausted their attempts", Run: a.queueFailed},
+		{Name: "queue:retry", Usage: "Put a failed job back on its queue", Run: a.queueRetry},
 	}
 }
 
@@ -113,4 +120,79 @@ func (a *App) routes(ctx context.Context, args []string) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", rt.Method, rt.Pattern, rt.Name)
 	}
 	return tw.Flush()
+}
+
+func (a *App) queueWork(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("queue:work", flag.ContinueOnError)
+	name := fs.String("queue", queue.Default, "which queue to drain")
+	concurrency := fs.Int("concurrency", 1, "how many jobs may run at once")
+	poll := fs.Duration("poll", time.Second, "how long to wait when the queue is empty")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	w := &queue.Worker{
+		Driver:       queue.NewDBDriver(a.DB),
+		Log:          a.Log,
+		Queue:        *name,
+		Concurrency:  *concurrency,
+		PollInterval: *poll,
+	}
+	// ctx is cancelled on Ctrl-C or SIGTERM. The worker then lets in-flight
+	// jobs finish rather than killing work that may already have had an effect.
+	return w.Run(ctx)
+}
+
+func (a *App) queueFailed(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("queue:failed", flag.ContinueOnError)
+	limit := fs.Int("limit", 25, "how many to show")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	failed, err := queue.NewDBDriver(a.DB).Failed(ctx, *limit)
+	if err != nil {
+		return err
+	}
+	if len(failed) == 0 {
+		fmt.Println("No failed jobs.")
+		return nil
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "ID\tQUEUE\tJOB\tATTEMPTS\tFAILED AT\tERROR")
+	for _, f := range failed {
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%d\t%s\t%s\n",
+			f.ID, f.Queue, f.Name, f.Attempts,
+			f.FailedAt.Format(time.RFC3339), firstLine(f.LastError))
+	}
+	return tw.Flush()
+}
+
+func (a *App) queueRetry(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: queue:retry <id> [id...]")
+	}
+
+	driver := queue.NewDBDriver(a.DB)
+	for _, raw := range args {
+		id, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return fmt.Errorf("%q is not a job id", raw)
+		}
+		if err := driver.Retry(ctx, uint(id)); err != nil {
+			return fmt.Errorf("retry %d: %w", id, err)
+		}
+		fmt.Printf("Job %d is back on its queue.\n", id)
+	}
+	return nil
+}
+
+// firstLine keeps a multi-line error, such as a panic with its stack, from
+// wrecking the table.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }

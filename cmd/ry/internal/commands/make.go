@@ -23,7 +23,46 @@ func makeCmds() []*cobra.Command {
 		makeSeederCmd(),
 		makeRequestCmd(),
 		makeAuthCmd(),
+		makeJobCmd(),
 	}
+}
+
+func makeJobCmd() *cobra.Command {
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:     "make:job <name>",
+		Short:   "Generate a background job",
+		Example: "  ry make:job SendWelcomeEmail",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, stub, err := makeContext(args[0])
+			if err != nil {
+				return err
+			}
+
+			dest := p.Path("app", "jobs", naming.Snake(args[0])+".go")
+			if err := scaffold.RenderTo(templates.FS, "make/job.go.tmpl", dest, stub, force); err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			reportCreated(out, p, dest)
+			fmt.Fprintf(out, `
+Dispatch it from a handler:
+
+	a.Queue.Dispatch(r.Context(), &jobs.%s{})
+
+Then run a worker alongside the server:
+
+	ry queue:work
+`, stub.Pascal)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite an existing file")
+	return cmd
 }
 
 func makeRequestCmd() *cobra.Command {

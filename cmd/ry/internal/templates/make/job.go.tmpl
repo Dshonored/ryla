@@ -1,0 +1,36 @@
+package jobs
+
+import (
+	"context"
+
+	"{{.RylaModule}}/queue"
+)
+
+func init() {
+	queue.Register(func() queue.Job { return &{{.Pascal}}{} })
+}
+
+// {{.Pascal}} runs in the background.
+//
+// Exported fields are the payload; keep them small and serialisable. Store an
+// id rather than a whole record, and read it fresh in Run — by then the row may
+// have changed.
+type {{.Pascal}} struct {
+	// ID uint `json:"id"`
+}
+
+// Name identifies the job in the queue. Changing it orphans any job already
+// queued under the old name.
+func ({{.Pascal}}) Name() string { return "{{.Kebab}}" }
+
+// Run performs the work. Returning an error schedules a retry with backoff
+// until the attempt limit is reached.
+//
+// This must tolerate running twice: a worker killed after doing the work but
+// before recording it will run the job again.
+func (j *{{.Pascal}}) Run(ctx context.Context) error {
+	return nil
+}
+
+// MaxAttempts overrides the default of three. Delete to use the default.
+func ({{.Pascal}}) MaxAttempts() int { return 3 }

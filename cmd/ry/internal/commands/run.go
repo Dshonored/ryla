@@ -195,6 +195,9 @@ func passthroughCmds() []*cobra.Command {
 		{"migrate:refresh", "Roll everything back, then migrate again"},
 		{"db:seed", "Run the database seeders"},
 		{"routes", "List the application's named routes"},
+		{"queue:work", "Run background jobs until interrupted"},
+		{"queue:failed", "List jobs that exhausted their attempts"},
+		{"queue:retry", "Put a failed job back on its queue"},
 	}
 
 	cmds := make([]*cobra.Command, 0, len(forwarded))

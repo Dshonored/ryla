@@ -20,6 +20,7 @@ import (
 	"{{.RylaModule}}/flash"
 	rylog "{{.RylaModule}}/log"
 	"{{.RylaModule}}/middleware"
+	"{{.RylaModule}}/queue"
 	"{{.RylaModule}}/router"
 	"{{.RylaModule}}/session"
 
@@ -29,6 +30,8 @@ import (
 	_ "{{.Module}}/database"
 	// Registers every migration in database/migrations with the runner.
 	_ "{{.Module}}/database/migrations"
+	// Registers every background job, so a worker can run them by name.
+	_ "{{.Module}}/app/jobs"
 )
 
 // devKey stands in for APP_KEY when it is missing outside production. It is a
@@ -45,6 +48,7 @@ type App struct {
 	Cookies *cookie.Jar
 	Flash   *flash.Store
 	Session session.Store
+	Queue   *queue.Dispatcher
 }
 
 // New builds the application: configuration, logging, database, cookies and the
@@ -121,6 +125,7 @@ func New() (*App, error) {
 		Cookies: jar,
 		Flash:   flash.New(jar),
 		Session: sessions,
+		Queue:   queue.NewDispatcher(queue.NewDBDriver(gdb)),
 	}, nil
 }
 

@@ -115,6 +115,19 @@ deliberately does not. Closing that needs mail: answer "check your inbox" either
 way, then send a welcome or a "you already have an account" message. Rate
 limiting makes harvesting impractical in the meantime.
 
+**Background work goes in `app/jobs`.** A job is a struct whose exported
+fields are its payload, serialised on dispatch and restored before it runs.
+Dispatch with `a.Queue.Dispatch(ctx, &jobs.Thing{})`; drain with
+`ry queue:work`. Failures retry with exponential backoff and, once attempts run
+out, land in `failed_jobs` where `queue:failed` and `queue:retry` can reach
+them.
+
+Two rules jobs must follow. Keep payloads small — store an id, not a record,
+and read it fresh in Run, because by then the row may have changed. And
+tolerate running twice: a worker killed after doing the work but before
+recording it will run the job again, and no queue can promise otherwise without
+the job's help.
+
 **APP_KEY signs cookies.** CSRF tokens, flash messages and sessions all depend
 on it. It is generated per project; the app refuses to start in production
 without one. Rotate with `ry key:generate --force`, which logs everyone out.
@@ -130,6 +143,7 @@ instead of half a page.
 app/controllers/   HTTP handlers; embed Base for Render/JSON/Redirect
 app/models/        GORM models
 app/middleware/    application middleware (framework middleware is in app.New)
+app/jobs/          background work, registered from init
 app/requests/      what a form may contain, and what counts as valid
 config/            typed settings
 database/migrations/  self-registering, timestamped
@@ -148,6 +162,7 @@ ry make:controller Posts --resource  # the seven CRUD handlers
 ry make:migration add_slug_to_posts
 ry make:middleware EnsureAdmin
 ry make:auth                       # registration, sign-in, sign-out
+ry make:job SendWelcomeEmail       # background job
 ry make:request CreatePost
 ry make:seeder Users
 ```
