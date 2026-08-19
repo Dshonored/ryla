@@ -21,6 +21,17 @@ type Config struct {
 	Log     Log
 	Session Session
 	Mail    Mail
+	Cache   Cache
+}
+
+// Cache describes where computed values are kept.
+type Cache struct {
+	// Driver is memory or db. Memory is per-process, so behind several
+	// instances each keeps its own copy and an invalidation on one is invisible
+	// to the others; db is shared and survives a restart.
+	Driver string
+	// TTL is the default lifetime for cached values.
+	TTL time.Duration
 }
 
 // Mail describes how email is sent.
@@ -93,6 +104,10 @@ func Load() *Config {
 		},
 		Session: Session{
 			Lifetime: ryconfig.Duration("SESSION_LIFETIME", 14*24*time.Hour),
+		},
+		Cache: Cache{
+			Driver: ryconfig.String("CACHE_DRIVER", "memory"),
+			TTL:    ryconfig.Duration("CACHE_TTL", time.Hour),
 		},
 		Mail: Mail{
 			Driver:      ryconfig.String("MAIL_DRIVER", defaultMailDriver(env)),

@@ -198,6 +198,8 @@ func passthroughCmds() []*cobra.Command {
 		{"queue:work", "Run background jobs until interrupted"},
 		{"queue:failed", "List jobs that exhausted their attempts"},
 		{"queue:retry", "Put a failed job back on its queue"},
+		{"schedule:run", "Run scheduled tasks until interrupted"},
+		{"schedule:list", "List the scheduled tasks"},
 	}
 
 	cmds := make([]*cobra.Command, 0, len(forwarded))

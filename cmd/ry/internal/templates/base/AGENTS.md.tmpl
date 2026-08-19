@@ -141,6 +141,19 @@ tolerate running twice: a worker killed after doing the work but before
 recording it will run the job again, and no queue can promise otherwise without
 the job's help.
 
+**Cache.** `cache.Remember(ctx, a.Cache, key, ttl, compute)` returns the
+cached value or computes it. Concurrent misses for one key are collapsed into a
+single computation, so a popular key expiring cannot stampede the database. A
+cache failure is never fatal — the value is computed and returned anyway,
+because a broken cache should make an application slow, not broken.
+CACHE_DRIVER is memory (per-process) or db (shared between instances).
+
+**Scheduled work** is declared in `app/schedule`, not a crontab, so it is
+reviewed and deployed with everything else and a task calling a function that
+no longer exists fails to compile. Run with `ry schedule:run`, or
+`schedule:run --once` from a system cron. Tasks do not overlap by default: one
+slower than its interval would otherwise pile up copies of itself.
+
 **APP_KEY signs cookies.** CSRF tokens, flash messages and sessions all depend
 on it. It is generated per project; the app refuses to start in production
 without one. Rotate with `ry key:generate --force`, which logs everyone out.
@@ -157,6 +170,7 @@ app/controllers/   HTTP handlers; embed Base for Render/JSON/Redirect
 app/models/        GORM models
 app/middleware/    application middleware (framework middleware is in app.New)
 app/jobs/          background work, registered from init
+app/schedule/      recurring tasks
 app/requests/      what a form may contain, and what counts as valid
 config/            typed settings
 database/migrations/  self-registering, timestamped

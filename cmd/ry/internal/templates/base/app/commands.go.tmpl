@@ -33,6 +33,8 @@ func (a *App) Commands() ryapp.Commands {
 		{Name: "queue:work", Usage: "Run background jobs until interrupted", Run: a.queueWork},
 		{Name: "queue:failed", Usage: "List jobs that exhausted their attempts", Run: a.queueFailed},
 		{Name: "queue:retry", Usage: "Put a failed job back on its queue", Run: a.queueRetry},
+		{Name: "schedule:run", Usage: "Run scheduled tasks until interrupted", Run: a.scheduleRun},
+		{Name: "schedule:list", Usage: "List the scheduled tasks", Run: a.scheduleList},
 	}
 }
 
@@ -195,4 +197,41 @@ func firstLine(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+func (a *App) scheduleRun(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("schedule:run", flag.ContinueOnError)
+	once := fs.Bool("once", false, "run whatever is due and exit, for use from a system cron")
+	tick := fs.Duration("tick", 30*time.Second, "how often to check for due tasks")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *once {
+		return a.Scheduler.RunOnce(ctx)
+	}
+	return a.Scheduler.Run(ctx, *tick)
+}
+
+func (a *App) scheduleList(ctx context.Context, args []string) error {
+	tasks := a.Scheduler.Tasks()
+	if len(tasks) == 0 {
+		fmt.Println("No scheduled tasks.")
+		return nil
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "TASK\tEVERY\tAT\tOVERLAP")
+	for _, t := range tasks {
+		at := t.At
+		if at == "" {
+			at = "-"
+		}
+		overlap := "no"
+		if t.AllowOverlap {
+			overlap = "yes"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", t.Name, t.Every, at, overlap)
+	}
+	return tw.Flush()
 }

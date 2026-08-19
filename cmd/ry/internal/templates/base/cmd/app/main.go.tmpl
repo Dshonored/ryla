@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"{{.Module}}/app"
+	appschedule "{{.Module}}/app/schedule"
 	"{{.Module}}/routes"
 )
 
@@ -22,10 +23,12 @@ func run() int {
 	}
 	defer a.Close()
 
-	// Routes are registered here rather than inside app.New so that the routes
-	// package can depend on app without a cycle. This is the one place that
-	// sees the whole application, which is exactly where wiring belongs.
+	// Routes and scheduled tasks are registered here rather than inside app.New,
+	// so those packages can depend on app without a cycle. This is the one
+	// place that sees the whole application, which is exactly where wiring
+	// belongs.
 	routes.Register(a)
+	appschedule.Register(a, a.Scheduler)
 
 	if err := a.Commands().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

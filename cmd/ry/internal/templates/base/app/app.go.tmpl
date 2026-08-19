@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"{{.RylaModule}}/auth"
+	"{{.RylaModule}}/cache"
 	"{{.RylaModule}}/cookie"
 	"{{.RylaModule}}/csrf"
 	rydb "{{.RylaModule}}/db"
@@ -24,6 +25,7 @@ import (
 	"{{.RylaModule}}/middleware"
 	"{{.RylaModule}}/queue"
 	"{{.RylaModule}}/router"
+	"{{.RylaModule}}/schedule"
 	"{{.RylaModule}}/session"
 
 	"{{.Module}}/config"
@@ -53,6 +55,12 @@ type App struct {
 	Queue   *queue.Dispatcher
 	Mail    mail.Mailer
 	Signer  *auth.Signer
+	Cache   cache.Store
+
+	// Scheduler is empty until main registers the tasks. Like routes, that
+	// happens outside this package: app/schedule needs the App, so this package
+	// cannot import it back without a cycle.
+	Scheduler *schedule.Scheduler
 }
 
 // New builds the application: configuration, logging, database, cookies and the
@@ -146,7 +154,18 @@ func New() (*App, error) {
 		Queue:   dispatcher,
 		Mail:    mailer,
 		Signer:  auth.NewSigner(key),
+		Cache:   buildCache(cfg, gdb),
+
+		Scheduler: schedule.New(logger),
 	}, nil
+}
+
+// buildCache picks the cache store from configuration.
+func buildCache(cfg *config.Config, gdb *gorm.DB) cache.Store {
+	if cfg.Cache.Driver == "db" {
+		return cache.NewDB(gdb)
+	}
+	return cache.NewMemory()
 }
 
 // buildMailer picks the delivery mechanism from configuration.
