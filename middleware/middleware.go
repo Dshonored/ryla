@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	rylog "github.com/Dshonored/ryla/log"
@@ -77,6 +79,19 @@ func Logger(log *slog.Logger) func(http.Handler) http.Handler {
 			if l == slog.Default() {
 				l = log
 			}
+
+			// A page load drags in every stylesheet, script and image with it,
+			// and those lines drown the request you actually wanted to read.
+			// Successful asset serves drop to debug rather than disappearing,
+			// so LOG_LEVEL=debug still shows them and a failing asset is never
+			// hidden.
+			level := slog.LevelInfo
+			switch {
+			case rec.status >= http.StatusInternalServerError:
+				level = slog.LevelWarn
+			case rec.status < http.StatusBadRequest && isAsset(r.URL.Path):
+				level = slog.LevelDebug
+			}
 			// Logged as a real time.Duration rather than a preformatted
 			// string so each handler can render it its own way: the console
 			// handler aligns and colours it, the JSON handler emits nanoseconds
@@ -88,11 +103,7 @@ func Logger(log *slog.Logger) func(http.Handler) http.Handler {
 				"bytes", rec.written,
 				slog.Duration("duration", time.Since(start)),
 			}
-			if rec.status >= http.StatusInternalServerError {
-				l.Warn(rylog.RequestMessage, attrs...)
-			} else {
-				l.Info(rylog.RequestMessage, attrs...)
-			}
+			l.Log(r.Context(), level, rylog.RequestMessage, attrs...)
 		})
 	}
 }
@@ -185,4 +196,22 @@ func toString(v any) string {
 	default:
 		return fmt.Sprintf("%v", v)
 	}
+}
+
+// assetExtensions are served, not handled: a request for one is infrastructure
+// noise on a dev console rather than something the application did.
+var assetExtensions = map[string]bool{
+	".css": true, ".js": true, ".mjs": true, ".map": true,
+	".ico": true, ".png": true, ".jpg": true, ".jpeg": true,
+	".gif": true, ".svg": true, ".webp": true, ".avif": true,
+	".woff": true, ".woff2": true, ".ttf": true, ".otf": true,
+	".mp4": true, ".webm": true,
+}
+
+// isAsset reports whether path looks like a static file.
+func isAsset(path string) bool {
+	if strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/assets/") {
+		return true
+	}
+	return assetExtensions[strings.ToLower(filepath.Ext(path))]
 }

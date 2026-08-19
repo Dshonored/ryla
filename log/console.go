@@ -121,18 +121,21 @@ func (h *ConsoleHandler) formatRequest(r slog.Record, attrs []slog.Attr) string 
 		}
 	}
 
+	// Columns are kept narrow deliberately. A wide path column leaves most
+	// lines trailing off into empty space, and the numbers on the right are
+	// what the eye scans down.
 	var b strings.Builder
 	b.WriteString(h.pal.Dim(r.Time.Format("15:04:05")))
 	b.WriteString("  ")
 	b.WriteString(padRight(h.methodColor(method), 4))
 	b.WriteString(" ")
-	b.WriteString(padRight(truncate(path, 32), 32))
-	b.WriteString(" ")
 	b.WriteString(padLeft(h.statusColor(status), 3))
 	b.WriteString("  ")
-	b.WriteString(padLeft(h.pal.Dim(humanBytes(bytes)), 8))
+	b.WriteString(padRight(truncate(path, 24), 24))
 	b.WriteString("  ")
-	b.WriteString(padLeft(h.durationColor(dur), 8))
+	b.WriteString(padLeft(h.durationColor(dur), 7))
+	b.WriteString("  ")
+	b.WriteString(padLeft(h.pal.Dim(humanBytes(bytes)), 7))
 
 	for _, a := range extra {
 		b.WriteString("  ")

@@ -75,11 +75,18 @@ func New(opts Options) *slog.Logger {
 
 	format := opts.Format
 	if format == "" {
-		format = FormatAuto
+		// Fall back to the environment before anything else.
+		//
+		// This is what lets an application generated before Format existed pick
+		// up the console output after nothing more than `ry update`: its
+		// config package never learned to read LOG_FORMAT, and a framework
+		// upgrade cannot rewrite generated source. `ry dev` sets the variable
+		// for the process it supervises, so old and new projects behave alike.
+		format = ParseFormat(os.Getenv("LOG_FORMAT"))
 	}
-	// The deprecated JSON field only speaks when Format has nothing to say, so
-	// an explicit Format always wins.
-	if opts.JSON && format == FormatAuto {
+	// The deprecated JSON field only speaks when nothing else has, so both an
+	// explicit Format and LOG_FORMAT win over it.
+	if opts.JSON && format == FormatAuto && os.Getenv("LOG_FORMAT") == "" {
 		format = FormatJSON
 	}
 	if format == FormatAuto {
