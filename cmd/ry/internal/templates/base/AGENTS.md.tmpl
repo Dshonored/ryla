@@ -98,6 +98,23 @@ email produce the *same* message, or the form becomes a way to discover
 registered addresses; and the unknown-email path still runs a hash, or it
 answers faster and gives the same thing away through timing.
 
+**Auth endpoints are rate limited.** Ten submissions a minute per IP on
+/login and /register, plus five failed sign-ins per email per fifteen minutes.
+A successful login clears the per-email count. Only POSTs are counted —
+throttling the page itself would lock someone out of seeing the form, and a
+throttled page renders no CSRF token, so every later submission would fail with
+a confusing 403.
+
+`ratelimit.ClientIP(r, trustProxy)` defaults to the socket address. Set
+trustProxy to true only behind a proxy that overwrites X-Forwarded-For;
+anywhere else a caller can change the header on every request and never be
+limited at all.
+
+**Registration still reveals whether an email is registered**, which login
+deliberately does not. Closing that needs mail: answer "check your inbox" either
+way, then send a welcome or a "you already have an account" message. Rate
+limiting makes harvesting impractical in the meantime.
+
 **APP_KEY signs cookies.** CSRF tokens, flash messages and sessions all depend
 on it. It is generated per project; the app refuses to start in production
 without one. Rotate with `ry key:generate --force`, which logs everyone out.

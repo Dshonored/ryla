@@ -1,7 +1,11 @@
 package routes
 
 import (
+	"net/http"
+	"time"
+
 	ryauth "{{.RylaModule}}/auth"
+	"{{.RylaModule}}/ratelimit"
 	"{{.RylaModule}}/router"
 
 	"{{.Module}}/app"
@@ -16,7 +20,7 @@ import (
 func RegisterAuth(a *app.App) {
 	auth := controllers.NewAuth(a)
 
-	// Loads the signed-in user onto the request context for every route below.
+	// Loads the signed-in user onto the request context for every route.
 	a.Router.Use(appmw.CurrentUser(a.DB))
 
 	// Guests only: an authenticated visitor has no business on a login form.
@@ -24,9 +28,33 @@ func RegisterAuth(a *app.App) {
 		r.Use(ryauth.RequireGuest("/"))
 
 		r.Get("/register", auth.ShowRegister).Name("register")
-		r.Post("/register", auth.Register).Name("register.store")
 		r.Get("/login", auth.ShowLogin).Name("login")
-		r.Post("/login", auth.Login).Name("login.store")
+
+		// Only the submissions are throttled.
+		//
+		// Counting page views too would lock someone out of even seeing the
+		// form after a few refreshes — and because the throttled page never
+		// renders a CSRF token, every later submission would fail with a 403
+		// that looks nothing like the real cause.
+		//
+		// Ten submissions a minute from one address: generous for a person
+		// mistyping a password, useless for guessing one or for walking a list
+		// of addresses through the sign-up form to see which already exist.
+		//
+		// trustProxy stays false. Behind a proxy that overwrites
+		// X-Forwarded-For, set it to true; anywhere else, trusting the header
+		// lets a caller change it every request and never be limited at all.
+		r.Group(func(r *router.Router) {
+			r.Use(ratelimit.Middleware(ratelimit.Config{
+				Limiter: ratelimit.New(10, time.Minute),
+				KeyFunc: func(req *http.Request) string {
+					return ratelimit.ClientIP(req, false)
+				},
+			}))
+
+			r.Post("/register", auth.Register).Name("register.store")
+			r.Post("/login", auth.Login).Name("login.store")
+		})
 	})
 
 	a.Router.Post("/logout", auth.Logout).Name("logout")

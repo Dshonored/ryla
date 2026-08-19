@@ -3,12 +3,15 @@ package controllers
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
 	ryauth "{{.RylaModule}}/auth"
 	"{{.RylaModule}}/flash"
+	"{{.RylaModule}}/ratelimit"
 	"{{.RylaModule}}/session"
 	"{{.RylaModule}}/validate"
 
@@ -21,11 +24,22 @@ import (
 // Auth handles registration, sign-in and sign-out.
 type Auth struct {
 	Base
+
+	// attempts throttles failed sign-ins per email address.
+	//
+	// The route-level limiter counts requests per IP; this counts failures per
+	// account, which is what stops one address being attacked from many
+	// machines. Only failures are counted, and a success clears the record, so
+	// this is invisible to anyone typing their own password.
+	attempts *ratelimit.Limiter
 }
 
 // NewAuth builds the controller.
 func NewAuth(a *app.App) *Auth {
-	return &Auth{Base{App: a}}
+	return &Auth{
+		Base:     Base{App: a},
+		attempts: ratelimit.New(5, 15*time.Minute),
+	}
 }
 
 // ShowRegister handles GET /register.
@@ -115,6 +129,18 @@ func (c *Auth) Login(w http.ResponseWriter, r *http.Request) {
 
 	form.Email = normalizeEmail(form.Email)
 
+	if ok, retryAfter := c.attempts.Allow(form.Email); !ok {
+		c.App.Log.Warn("sign-in throttled", "email", form.Email, "retry_after", retryAfter)
+		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
+
+		bag := validate.ErrorBag{}
+		bag.Add("email", "Too many sign-in attempts. Try again in a few minutes.")
+		c.RenderStatus(w, r, http.StatusTooManyRequests, auth.Login(auth.LoginForm{
+			Email: form.Email, Errors: bag,
+		}))
+		return
+	}
+
 	var user models.User
 	err = c.App.DB.Where("email = ?", form.Email).First(&user).Error
 
@@ -148,6 +174,10 @@ func (c *Auth) Login(w http.ResponseWriter, r *http.Request) {
 			c.App.DB.Model(&user).Update("password", hash)
 		}
 	}
+
+	// A correct password clears the record, so someone who mistyped twice and
+	// then got it right is not left near the limit.
+	c.attempts.Reset(form.Email)
 
 	s := session.From(r.Context())
 	ryauth.LoginID(s, user.ID)
