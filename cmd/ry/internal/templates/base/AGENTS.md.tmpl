@@ -63,6 +63,11 @@ calling `os.Getenv` from the code that uses them.
 **Real environment variables beat `.env`.** `.env` fills in what the environment
 has not already set, never the reverse.
 
+**The browser reloads itself.** `ry dev` sets RYLA_DEV, which makes the server
+inject a small script that watches an event stream. A rebuild restarts the
+process, the stream drops, and the page reloads once the new server answers.
+Nothing to configure, and it is absent from a production build.
+
 **Forms follow one shape.** Declare what a request may contain in
 `app/requests`, then bind and validate in one step:
 

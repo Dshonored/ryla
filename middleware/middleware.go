@@ -213,5 +213,10 @@ func isAsset(path string) bool {
 	if strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/assets/") {
 		return true
 	}
+	// The dev-reload endpoints are the tooling talking to itself, and the event
+	// stream stays open for as long as the tab does.
+	if strings.HasPrefix(path, "/_ryla/") {
+		return true
+	}
 	return assetExtensions[strings.ToLower(filepath.Ext(path))]
 }

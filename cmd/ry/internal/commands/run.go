@@ -61,7 +61,7 @@ instead.`,
 			// work out for itself that a human is watching. The parent can, so
 			// it says so explicitly — otherwise `ry dev` would show the JSON
 			// output meant for log aggregators.
-			env := []string{"LOG_FORMAT=console"}
+			env := []string{"LOG_FORMAT=console", "RYLA_DEV=1"}
 			if !noColor && rylog.ColorEnabled(os.Stdout) {
 				env = append(env, "FORCE_COLOR=1")
 			}

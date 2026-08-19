@@ -15,6 +15,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/Dshonored/ryla/devreload"
 )
 
 // Server runs an http.Handler and shuts it down cleanly when its context is
@@ -43,9 +45,18 @@ func (s *Server) Run(ctx context.Context) error {
 		log = slog.Default()
 	}
 
+	handler := s.Handler
+	if devreload.Enabled() {
+		// Wired here rather than in the generated app's middleware stack so
+		// that projects created before live reload existed pick it up from a
+		// framework update alone, with no source changes.
+		handler = devreload.Middleware(handler)
+		log.Info("live reload enabled")
+	}
+
 	srv := &http.Server{
 		Addr:              s.Addr,
-		Handler:           s.Handler,
+		Handler:           handler,
 		ReadHeaderTimeout: orDefault(s.ReadHeaderTimeout, 10*time.Second),
 		ReadTimeout:       orDefault(s.ReadTimeout, 30*time.Second),
 		WriteTimeout:      orDefault(s.WriteTimeout, 30*time.Second),
