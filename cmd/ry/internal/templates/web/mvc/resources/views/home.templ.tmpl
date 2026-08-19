@@ -1,14 +1,138 @@
 package views
 
-templ Home(appName string) {
-	@Layout(appName) {
-		<h1>{ appName }</h1>
-		<p class="lead">Your Ryla application is running.</p>
-		<ul class="next">
-			<li><code>ry make:controller Posts</code> — add a controller</li>
-			<li><code>ry make:model Post</code> — add a model and its migration</li>
-			<li><code>ry migrate</code> — apply pending migrations</li>
-			<li>Edit <code>resources/views/home.templ</code> — this page reloads on save</li>
-		</ul>
+// Env is what the welcome page reports about the running application. Delete
+// this along with the rest of the demo once you have your own home page.
+type Env struct {
+	AppName   string
+	RylaVer   string
+	GoVer     string
+	Env       string
+	Database  string
+	Routes    int
+	StartedAt string
+}
+
+templ Home(env Env) {
+	@Layout(env.AppName) {
+		<div class="stack">
+			<header class="stack-sm">
+				<span class="badge">Ryla { env.RylaVer }</span>
+				<h1>{ env.AppName } is running</h1>
+				<p class="muted">
+					Everything below is a demo page. Replace it with your own — the
+					last card says which files to touch.
+				</p>
+			</header>
+
+			<section class="card stack">
+				<div class="stack-sm">
+					<h2>It talks to the server</h2>
+					<p class="muted small">
+						This button posts to <code>/demo/counter</code>, a route in
+						<code>routes/web.go</code> handled in
+						<code>app/controllers/demo.go</code>. The count lives in memory on
+						the server, so it resets when the app restarts.
+					</p>
+				</div>
+
+				<div class="counter">
+					<span id="counter-value" class="counter-value" data-count="0">0</span>
+					<button id="counter-button" class="btn" type="button">Increment</button>
+					<button id="counter-reset" class="btn btn-quiet" type="button">Reset</button>
+				</div>
+
+				<p id="counter-error" class="small" style="color: var(--danger); display: none;"></p>
+			</section>
+
+			<section class="stack">
+				<h2>Environment</h2>
+				<div class="grid">
+					<dl class="stat">
+						<dt>Environment</dt>
+						<dd>{ env.Env }</dd>
+					</dl>
+					<dl class="stat">
+						<dt>Database</dt>
+						<dd>{ env.Database }</dd>
+					</dl>
+					<dl class="stat">
+						<dt>Go</dt>
+						<dd>{ env.GoVer }</dd>
+					</dl>
+					<dl class="stat">
+						<dt>Named routes</dt>
+						<dd>{ env.Routes }</dd>
+					</dl>
+				</div>
+			</section>
+
+			<section class="card stack">
+				<div class="stack-sm">
+					<h2>What to edit</h2>
+					<p class="muted small">
+						Save any of these while <code>ry dev</code> is running and the page
+						reloads on its own.
+					</p>
+				</div>
+
+				<ul class="files">
+					<li>
+						<code>resources/views/home.templ</code>
+						<span>This page. Views are compiled, so mistakes are build errors.</span>
+					</li>
+					<li>
+						<code>routes/web.go</code>
+						<span>The route table. Written by hand; no generator rewrites it.</span>
+					</li>
+					<li>
+						<code>app/controllers/home.go</code>
+						<span>The handler behind this page.</span>
+					</li>
+					<li>
+						<code>resources/static/app.css</code>
+						<span>The design system — tokens at the top, components below.</span>
+					</li>
+					<li>
+						<code>config/config.go</code>
+						<span>Every setting, its environment variable and its default.</span>
+					</li>
+				</ul>
+			</section>
+
+			<section class="card stack">
+				<div class="stack-sm">
+					<h2>Next</h2>
+					<p class="muted small">Generators write real Go files you can read and edit.</p>
+				</div>
+
+				<ul class="files">
+					<li>
+						<code>ry make:model Post</code>
+						<span>A model plus its create-table migration.</span>
+					</li>
+					<li>
+						<code>ry make:controller Posts --resource</code>
+						<span>The seven CRUD handlers, and the route lines to paste.</span>
+					</li>
+					<li>
+						<code>ry migrate</code>
+						<span>Apply pending migrations.</span>
+					</li>
+					<li>
+						<code>ry routes</code>
+						<span>List every named route.</span>
+					</li>
+				</ul>
+			</section>
+
+			<p class="footer">
+				Remove the demo when you are ready: delete
+				<code>app/controllers/demo.go</code>, its route in
+				<code>routes/web.go</code>, <code>resources/static/demo.js</code>, and
+				rewrite <code>home.templ</code>.
+			</p>
+		</div>
+
+		<script src="/static/demo.js" defer></script>
 	}
 }

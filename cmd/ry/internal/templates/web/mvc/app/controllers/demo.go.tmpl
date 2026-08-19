@@ -1,0 +1,43 @@
+package controllers
+
+import (
+	"net/http"
+	"sync/atomic"
+
+	"{{.Module}}/app"
+)
+
+// Demo backs the counter on the welcome page. It exists to prove the whole
+// round trip works — route, controller, JSON response — and to be deleted.
+//
+// Delete this file, the /demo routes in routes/web.go, and
+// resources/static/demo.js once you have your own home page.
+type Demo struct {
+	Base
+
+	// count is atomic because handlers run concurrently: every request is its
+	// own goroutine, so a plain int here would be a data race that only shows
+	// up under load.
+	count atomic.Int64
+}
+
+// NewDemo builds the controller.
+func NewDemo(a *app.App) *Demo {
+	return &Demo{Base: Base{App: a}}
+}
+
+// Counter handles GET and POST /demo/counter. GET reports the current value;
+// POST increments it first, so a page reload does not appear to reset it.
+func (c *Demo) Counter(w http.ResponseWriter, r *http.Request) {
+	count := c.count.Load()
+	if r.Method == http.MethodPost {
+		count = c.count.Add(1)
+	}
+	c.JSON(w, r, http.StatusOK, map[string]int64{"count": count})
+}
+
+// Reset handles POST /demo/counter/reset.
+func (c *Demo) Reset(w http.ResponseWriter, r *http.Request) {
+	c.count.Store(0)
+	c.JSON(w, r, http.StatusOK, map[string]int64{"count": 0})
+}

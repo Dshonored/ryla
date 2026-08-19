@@ -2,6 +2,10 @@ package controllers
 
 import (
 	"net/http"
+	"runtime"
+	"strings"
+
+	"github.com/Dshonored/ryla"
 
 	"{{.Module}}/app"
 	"{{.Module}}/resources/views"
@@ -21,5 +25,12 @@ func NewHome(a *app.App) *Home {
 
 // Index handles GET /.
 func (c *Home) Index(w http.ResponseWriter, r *http.Request) {
-	c.Render(w, r, views.Home(c.App.Config.Name))
+	c.Render(w, r, views.Home(views.Env{
+		AppName:  c.App.Config.Name,
+		RylaVer:  ryla.Version(),
+		GoVer:    strings.TrimPrefix(runtime.Version(), "go"),
+		Env:      c.App.Config.Env,
+		Database: c.App.Config.DB.Driver,
+		Routes:   len(c.App.Router.Routes()),
+	}))
 }

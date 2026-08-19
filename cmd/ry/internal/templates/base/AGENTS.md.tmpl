@@ -18,6 +18,18 @@ module `{{.Module}}`, {{.DB}} database, `{{.Web}}` web mode.
 Prefer `ry` over raw `go run`: it regenerates view code first, which the build
 needs. `ry` commands accept `--json` where there is something to parse.
 
+## The demo page
+
+A new project ships a welcome page that exercises the whole stack. It is meant
+to be deleted. Removing it means: `app/controllers/demo.go`, the `/demo/counter`
+routes in `routes/web.go`, `resources/static/demo.js`, the `Env` struct in
+`resources/views/home.templ`, and the fields it reads in
+`app/controllers/home.go`.
+
+`resources/static/app.css` is not part of the demo — it is a design system of
+tokens and components. Keep it and build on it, or replace it; nothing in the
+framework depends on those class names.
+
 ## Do not edit these
 
 - **`*_templ.go`** — generated from the neighbouring `.templ` file by

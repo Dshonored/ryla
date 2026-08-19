@@ -16,11 +16,18 @@ import (
 // Register attaches every route to the application's router.
 func Register(a *app.App) {
 	home := controllers.NewHome(a)
+	demo := controllers.NewDemo(a)
 
 	a.Router.Static("/static", resources.Static())
 
 	a.Router.Get("/", home.Index).Name("home")
 	a.Router.Get("/up", health).Name("health")
+
+	// The welcome page's counter. Delete these two lines, app/controllers/demo.go
+	// and resources/static/demo.js once you have your own home page.
+	a.Router.Get("/demo/counter", demo.Counter).Name("demo.counter")
+	a.Router.Post("/demo/counter", demo.Counter).Name("demo.counter.increment")
+	a.Router.Post("/demo/counter/reset", demo.Reset).Name("demo.counter.reset")
 }
 
 // health is the liveness endpoint. Deployment tooling wants a route that

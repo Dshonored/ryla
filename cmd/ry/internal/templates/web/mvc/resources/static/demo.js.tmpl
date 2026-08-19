@@ -1,0 +1,82 @@
+// Demo counter for the welcome page.
+//
+// Kept in a plain file rather than inline so there is no build step and no
+// inline-script exception to make in a future Content-Security-Policy. Delete
+// this file, app/controllers/demo.go and the /demo/counter routes once you have
+// your own home page.
+
+(function () {
+	"use strict";
+
+	const value = document.getElementById("counter-value");
+	const increment = document.getElementById("counter-button");
+	const reset = document.getElementById("counter-reset");
+	const error = document.getElementById("counter-error");
+
+	if (!value || !increment || !reset) {
+		return;
+	}
+
+	function show(count) {
+		value.textContent = String(count);
+		value.dataset.count = String(count);
+
+		// Restart the animation: without removing the class first, a second
+		// click within the animation's lifetime does nothing visible.
+		value.classList.remove("bumped");
+		void value.offsetWidth;
+		value.classList.add("bumped");
+	}
+
+	function fail(message) {
+		if (!error) return;
+		error.textContent = message;
+		error.style.display = "block";
+	}
+
+	function clearError() {
+		if (!error) return;
+		error.style.display = "none";
+	}
+
+	async function call(path) {
+		increment.disabled = true;
+		reset.disabled = true;
+		clearError();
+
+		try {
+			const response = await fetch(path, {
+				method: "POST",
+				headers: { Accept: "application/json" },
+			});
+			if (!response.ok) {
+				throw new Error("server responded " + response.status);
+			}
+
+			const body = await response.json();
+			show(body.count);
+		} catch (err) {
+			fail("Could not reach the server: " + err.message);
+		} finally {
+			increment.disabled = false;
+			reset.disabled = false;
+		}
+	}
+
+	increment.addEventListener("click", () => call("/demo/counter"));
+	reset.addEventListener("click", () => call("/demo/counter/reset"));
+
+	// Show the count the server already holds, so a page reload does not
+	// pretend it is back to zero.
+	fetch("/demo/counter", { headers: { Accept: "application/json" } })
+		.then((r) => (r.ok ? r.json() : null))
+		.then((body) => {
+			if (body && typeof body.count === "number") {
+				value.textContent = String(body.count);
+				value.dataset.count = String(body.count);
+			}
+		})
+		.catch(() => {
+			/* The page is still useful without it. */
+		});
+})();

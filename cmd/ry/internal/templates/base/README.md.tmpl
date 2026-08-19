@@ -25,6 +25,17 @@ The app listens on http://localhost:8080.
 | `ry make:model Post` | Generate a model and its migration |
 | `ry routes` | List named routes |
 
+## The welcome page
+
+The page at `/` is a demo: it exercises a route, a controller, a JSON endpoint
+and a compiled view, and tells you which files to edit. Delete it when you have
+your own — `app/controllers/demo.go`, the `/demo/counter` routes, and
+`resources/static/demo.js`.
+
+`resources/static/app.css` is a design system rather than demo styling: tokens
+at the top, then base elements, then components. Change the tokens and the whole
+application restyles.
+
 ## Layout
 
 ```
