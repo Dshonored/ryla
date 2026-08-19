@@ -49,6 +49,18 @@ var databases = []Database{
 		Summary:      "A single file, no server. Pure Go, so the binary still cross-compiles.",
 	},
 	{
+		Name:    "mongo",
+		Overlay: "db/mongo",
+		// The database is named in the URI's path, which is the form hosting
+		// providers hand out, so one pasted string is enough to connect.
+		DefaultDSN: "mongodb://localhost:27017/%s",
+		// The driver's own default. Named MaxOpenConns like the SQL engines
+		// because it is the same knob; MongoDB calls it maxPoolSize.
+		MaxOpenConns: 100,
+		Available:    true,
+		Summary:      "Documents rather than rows. No GORM and no migrations: indexes are declared in code.",
+	},
+	{
 		Name:         "postgres",
 		Overlay:      "db/postgres",
 		DefaultDSN:   "postgres://postgres:postgres@localhost:5432/%s?sslmode=disable",

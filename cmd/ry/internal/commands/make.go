@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -157,11 +158,26 @@ func makeModelCmd() *cobra.Command {
 			}
 			out := cmd.OutOrStdout()
 
+			// A document type and a GORM model share nothing but a file path,
+			// so the stub is chosen from the manifest rather than patched with
+			// conditionals.
+			tmpl := "make/model.go.tmpl"
+			if isDocumentStore(p) {
+				tmpl = "make/model_mongo.go.tmpl"
+			}
+
 			dest := p.Path("app", "models", naming.Snake(args[0])+".go")
-			if err := scaffold.RenderTo(templates.FS, "make/model.go.tmpl", dest, stub, force); err != nil {
+			if err := scaffold.RenderTo(templates.FS, tmpl, dest, stub, force); err != nil {
 				return err
 			}
 			reportCreated(out, p, dest)
+
+			if isDocumentStore(p) {
+				// No migration to pair it with: the model declares its own
+				// indexes, and applying them is what `ry migrate` does.
+				fmt.Fprintf(out, "\nAdd your fields, then run: ry migrate\n")
+				return nil
+			}
 
 			if skipMigration {
 				return nil
@@ -196,6 +212,11 @@ func makeMigrationCmd() *cobra.Command {
 			p, stub, err := makeContext(args[0])
 			if err != nil {
 				return err
+			}
+			if isDocumentStore(p) {
+				return errors.New(
+					"this project stores documents, and a document store has no schema to migrate.\n" +
+						"Declare the indexes a model needs from init in app/models, then run `ry migrate`")
 			}
 
 			migration := stub.WithMigration(args[0], time.Now())
@@ -255,8 +276,15 @@ func makeSeederCmd() *cobra.Command {
 				return err
 			}
 
+			// The two stubs differ only in the handle they take, but a seeder
+			// asking for a *gorm.DB in a MongoDB project does not compile.
+			tmpl := "make/seeder.go.tmpl"
+			if isDocumentStore(p) {
+				tmpl = "make/seeder_mongo.go.tmpl"
+			}
+
 			dest := p.Path("database", "seeders", naming.Snake(args[0])+".go")
-			if err := scaffold.RenderTo(templates.FS, "make/seeder.go.tmpl", dest, stub, force); err != nil {
+			if err := scaffold.RenderTo(templates.FS, tmpl, dest, stub, force); err != nil {
 				return err
 			}
 
@@ -270,6 +298,13 @@ func makeSeederCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite an existing file")
 	return cmd
 }
+
+// isDocumentStore reports whether the project keeps documents rather than rows.
+//
+// The generators read the manifest rather than sniffing the source tree,
+// because it is the one place that records what `ry new` was asked for and it
+// cannot drift the way a heuristic can.
+func isDocumentStore(p *project.Project) bool { return p.Database == "mongo" }
 
 // makeContext locates the project and builds the template data for a generator.
 func makeContext(name string) (*project.Project, scaffold.Stub, error) {

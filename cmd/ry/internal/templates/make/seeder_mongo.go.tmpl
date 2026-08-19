@@ -1,0 +1,12 @@
+package seeders
+
+import (
+	"context"
+
+	rymongo "{{.RylaModule}}/mongo"
+)
+
+// seed{{.Pascal}} inserts {{.KebabPlural}}. Add it to the list in Run.
+func seed{{.Pascal}}(ctx context.Context, db *rymongo.Database) error {
+	return nil
+}

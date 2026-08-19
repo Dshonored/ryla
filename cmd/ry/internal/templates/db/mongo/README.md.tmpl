@@ -1,0 +1,89 @@
+# {{.Name}}
+
+A [Ryla](https://github.com/Dshonored/ryla) application, on MongoDB.
+
+## Getting started
+
+Point `MONGO_URI` in `.env` at a server, then:
+
+```bash
+ry migrate   # create the indexes the application declares
+ry dev       # start the dev server with live reload
+```
+
+The app listens on http://localhost:8080.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `ry dev` | Watch, rebuild, restart, and reload the browser |
+| `ry build` | Compile a single static binary |
+| `ry start` | Run the compiled binary |
+| `ry migrate` | Create every declared index |
+| `ry migrate:status` | List the indexes on the server, declared or not |
+| `ry make:controller Posts` | Generate a controller |
+| `ry make:job SendEmail` | Generate a background job |
+| `ry queue:work` | Run background jobs |
+| `ry schedule:run` | Run recurring tasks |
+| `ry make:request CreatePost` | Generate a validated request type |
+| `ry key:generate` | Generate the key that signs cookies |
+| `ry make:model Post` | Generate a document type and its index declaration |
+| `ry routes` | List named routes |
+
+## No migrations
+
+A document store has no schema to migrate. Adding a field means writing
+documents that have it, and older documents simply do not — so there is nothing
+for a migration to alter and nothing for a rollback to undo.
+
+Indexes are the part that genuinely has to be declared, created before anything
+relies on them, and kept in step across environments. Each model declares its
+own from `init`; `ry migrate` applies them. Creating an index that already
+exists is a no-op, so it is safe on every deploy.
+
+`ry migrate:status` lists what the server actually has, marking any index that
+is not declared in the code — usually one created by hand, or left over from a
+deploy that has since dropped the declaration.
+
+## The welcome page
+
+The page at `/` is a demo: it exercises a route, a controller, a JSON endpoint
+and a compiled view, and tells you which files to edit. Delete it when you have
+your own — `app/controllers/demo.go`, the `/demo/counter` routes, and
+`resources/static/demo.js`.
+
+`resources/static/app.css` is a design system rather than demo styling: tokens
+at the top, then base elements, then components. Change the tokens and the whole
+application restyles.
+
+## Layout
+
+```
+app/            controllers, models, middleware — your code
+app/models/     document types and the indexes they declare
+app/requests/   what a form may contain, and what counts as valid
+config/         typed configuration, read from the environment
+database/       connection defaults and seeders
+resources/      templ views and static assets
+routes/         the route table
+storage/        logs and build scratch
+cmd/app/        the binary's entrypoint
+```
+
+## Working with coding agents
+
+[AGENTS.md](AGENTS.md) describes the layout, the conventions and which files are
+generated, so Claude Code, Cursor and similar tools do not hand-edit `*_templ.go`
+or rewrite `routes/web.go`. `CLAUDE.md` points at the same file.
+
+## Deploying
+
+`ry build` produces one static binary with the views and static assets compiled
+in. Copy it and the `.env` file to the server; nothing else is required — no Go
+toolchain and no `ry`. A MongoDB server is, of course, still required.
+
+```bash
+./{{.Name}} migrate
+./{{.Name}} serve
+```

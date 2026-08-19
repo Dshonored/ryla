@@ -49,6 +49,11 @@ func TestDotfilesAreEmbedded(t *testing.T) {
 		"base/.env.example.tmpl",
 		"base/.gitignore.tmpl",
 		"base/storage/.gitkeep.tmpl",
+		// A database overlay replaces .env wholesale, so the same trap applies
+		// one directory down: skipped here, a Mongo project would silently
+		// inherit the SQL one.
+		"db/mongo/.env.tmpl",
+		"db/mongo/.env.example.tmpl",
 	}
 
 	for _, name := range want {
@@ -61,7 +66,7 @@ func TestDotfilesAreEmbedded(t *testing.T) {
 // TestOverlaysExist checks that every overlay a project can select is actually
 // present in the embedded filesystem.
 func TestOverlaysExist(t *testing.T) {
-	for _, overlay := range []string{Base, Make, "db/sqlite", "web/mvc"} {
+	for _, overlay := range []string{Base, Make, "db/sqlite", "db/mongo", "web/mvc"} {
 		info, err := fs.Stat(FS, overlay)
 		if err != nil {
 			t.Errorf("overlay %s is missing: %v", overlay, err)

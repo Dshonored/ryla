@@ -37,6 +37,14 @@ end rather than inserted for you.`,
 					"make:auth generates server-rendered pages, so it needs the mvc web mode; this project is %q",
 					p.Web)
 			}
+			if isDocumentStore(p) {
+				// Better to refuse than to write a User model and a migration
+				// against GORM, which this project does not have: the files
+				// would land and then fail to compile.
+				return fmt.Errorf(
+					"make:auth is written against SQL and GORM, which a %s project does not use; it has no MongoDB scaffold yet",
+					p.Database)
+			}
 
 			// The auth templates only need the module paths, which a Stub
 			// already carries.

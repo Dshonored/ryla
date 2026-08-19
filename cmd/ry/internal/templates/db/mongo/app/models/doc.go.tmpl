@@ -1,0 +1,16 @@
+// Package models holds this application's documents.
+//
+// A document is a plain struct with bson tags. There is no ORM: the framework's
+// mongo package gives a typed Collection over the driver, and nothing here
+// pretends a document is a row.
+//
+// Each model declares the indexes it needs from init, so importing this package
+// is enough for `ry migrate` to find them — which is exactly what app/app.go
+// does. That is the whole of what replaces migrations: a document store has no
+// schema to migrate, and indexes are the part that genuinely has to be created
+// before anything relies on them.
+//
+// Create one with:
+//
+//	ry make:model Post
+package models

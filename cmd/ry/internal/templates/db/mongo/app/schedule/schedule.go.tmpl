@@ -1,0 +1,33 @@
+// Package schedule declares this application's recurring work.
+//
+// Tasks live in code rather than a crontab, so they are reviewed, versioned and
+// deployed with everything else — and a task calling a function that no longer
+// exists fails to compile instead of failing quietly at three in the morning.
+package schedule
+
+import (
+	ryschedule "{{.RylaModule}}/schedule"
+
+	"{{.Module}}/app"
+)
+
+// Register declares every scheduled task.
+//
+// Run them with `ry schedule:run`, either as a long-lived process or from a
+// system cron with --once.
+//
+// Nothing ships here. The housekeeping a SQL project needs — pruning expired
+// sessions and cache entries — has no counterpart on MongoDB: both collections
+// carry a TTL index, so the server expires the documents itself and a sweeper
+// would only be doing work twice.
+func Register(a *app.App, s *ryschedule.Scheduler) {
+	// Your tasks go here:
+	//
+	//	s.Daily("03:00", "send-digest", func(ctx context.Context) error {
+	//	    return a.Queue.Dispatch(ctx, &jobs.SendDigest{})
+	//	})
+	//
+	//	s.Every(15*time.Minute, "sync-inventory", func(ctx context.Context) error {
+	//	    return nil
+	//	})
+}

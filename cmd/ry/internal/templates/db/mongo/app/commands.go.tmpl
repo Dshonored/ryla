@@ -1,0 +1,237 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	ryapp "{{.RylaModule}}/app"
+	rymongo "{{.RylaModule}}/mongo"
+	"{{.RylaModule}}/queue"
+
+	"{{.Module}}/database/seeders"
+)
+
+// Commands is the command set of the built application binary. Because these
+// live on the binary rather than in the `ry` CLI, production deployments need
+// nothing installed beyond the binary itself.
+//
+// There is no migrate:rollback or migrate:refresh here, and their absence is
+// deliberate. Applying an index is idempotent, so there is no ledger to unwind
+// and nothing a rollback could mean; dropping indexes on a live collection is
+// an operator's decision, not a deploy step.
+func (a *App) Commands() ryapp.Commands {
+	return ryapp.Commands{
+		{Name: "serve", Usage: "Start the HTTP server", Run: a.serve},
+		{Name: "migrate", Usage: "Create the indexes this application declares", Run: a.migrate},
+		{Name: "migrate:status", Usage: "Show which indexes exist on the server", Run: a.migrateStatus},
+		{Name: "db:seed", Usage: "Run the database seeders", Run: a.dbSeed},
+		{Name: "routes", Usage: "List the application's named routes", Run: a.routes},
+		{Name: "queue:work", Usage: "Run background jobs until interrupted", Run: a.queueWork},
+		{Name: "queue:failed", Usage: "List jobs that exhausted their attempts", Run: a.queueFailed},
+		{Name: "queue:retry", Usage: "Put a failed job back on its queue", Run: a.queueRetry},
+		{Name: "schedule:run", Usage: "Run scheduled tasks until interrupted", Run: a.scheduleRun},
+		{Name: "schedule:list", Usage: "List the scheduled tasks", Run: a.scheduleList},
+	}
+}
+
+func (a *App) serve(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	addr := fs.String("addr", a.Config.Addr, "address to listen on")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	srv := &ryapp.Server{
+		Addr:            *addr,
+		Handler:         a.Router,
+		Log:             a.Log,
+		ShutdownTimeout: 15 * time.Second,
+	}
+	return srv.Run(ctx)
+}
+
+func (a *App) indexes() *rymongo.Syncer {
+	return rymongo.NewSyncer(a.DB, a.Log)
+}
+
+// migrate creates every declared index. It is named migrate because that is the
+// step in a deploy it occupies, not because anything is being migrated: the
+// declarations are the desired state, and applying them again is a no-op.
+func (a *App) migrate(ctx context.Context, args []string) error {
+	return a.indexes().Sync(ctx)
+}
+
+func (a *App) migrateStatus(ctx context.Context, args []string) error {
+	statuses, err := a.indexes().Status(ctx)
+	if err != nil {
+		return err
+	}
+	if len(statuses) == 0 {
+		fmt.Println("No collections yet. Run migrate, or write a document.")
+		return nil
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "STATUS\tCOLLECTION\tINDEX\tKEYS")
+	for _, s := range statuses {
+		// An undeclared index is one the server has and the code does not:
+		// created by hand, or left behind by a deploy that has since dropped
+		// the declaration. Worth seeing rather than removing automatically.
+		status := "undeclared"
+		if s.Declared {
+			status = "declared"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", status, s.Collection, s.Name, s.Keys)
+	}
+	return tw.Flush()
+}
+
+func (a *App) dbSeed(ctx context.Context, args []string) error {
+	return seeders.Run(ctx, a.DB)
+}
+
+func (a *App) routes(ctx context.Context, args []string) error {
+	all := a.Router.Routes()
+	if len(all) == 0 {
+		fmt.Println("No named routes. Name a route with .Name(\"...\") to see it here.")
+		return nil
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "METHOD\tPATTERN\tNAME")
+	for _, rt := range all {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", rt.Method, rt.Pattern, rt.Name)
+	}
+	return tw.Flush()
+}
+
+func (a *App) queueWork(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("queue:work", flag.ContinueOnError)
+	name := fs.String("queue", queue.Default, "which queue to drain")
+	concurrency := fs.Int("concurrency", 1, "how many jobs may run at once")
+	poll := fs.Duration("poll", time.Second, "how long to wait when the queue is empty")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	w := &queue.Worker{
+		// The configured driver, not a hardcoded one: dispatching to Redis
+		// while draining MongoDB means jobs simply never run, and nothing says
+		// so.
+		Driver:       a.QueueDriver,
+		Log:          a.Log,
+		Queue:        *name,
+		Concurrency:  *concurrency,
+		PollInterval: *poll,
+	}
+	// ctx is cancelled on Ctrl-C or SIGTERM. The worker then lets in-flight
+	// jobs finish rather than killing work that may already have had an effect.
+	return w.Run(ctx)
+}
+
+func (a *App) queueFailed(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("queue:failed", flag.ContinueOnError)
+	limit := fs.Int("limit", 25, "how many to show")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	lister, ok := a.QueueDriver.(queue.FailedLister)
+	if !ok {
+		return errors.New("the configured queue driver does not keep failed jobs")
+	}
+
+	failed, err := lister.Failed(ctx, *limit)
+	if err != nil {
+		return err
+	}
+	if len(failed) == 0 {
+		fmt.Println("No failed jobs.")
+		return nil
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "ID\tQUEUE\tJOB\tATTEMPTS\tFAILED AT\tERROR")
+	for _, f := range failed {
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%d\t%s\t%s\n",
+			f.ID, f.Queue, f.Name, f.Attempts,
+			f.FailedAt.Format(time.RFC3339), firstLine(f.LastError))
+	}
+	return tw.Flush()
+}
+
+func (a *App) queueRetry(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: queue:retry <id> [id...]")
+	}
+
+	retrier, ok := a.QueueDriver.(queue.Retrier)
+	if !ok {
+		return errors.New("the configured queue driver cannot retry failed jobs")
+	}
+
+	for _, raw := range args {
+		id, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return fmt.Errorf("%q is not a job id", raw)
+		}
+		if err := retrier.Retry(ctx, uint(id)); err != nil {
+			return fmt.Errorf("retry %d: %w", id, err)
+		}
+		fmt.Printf("Job %d is back on its queue.\n", id)
+	}
+	return nil
+}
+
+// firstLine keeps a multi-line error, such as a panic with its stack, from
+// wrecking the table.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
+func (a *App) scheduleRun(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("schedule:run", flag.ContinueOnError)
+	once := fs.Bool("once", false, "run whatever is due and exit, for use from a system cron")
+	tick := fs.Duration("tick", 30*time.Second, "how often to check for due tasks")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *once {
+		return a.Scheduler.RunOnce(ctx)
+	}
+	return a.Scheduler.Run(ctx, *tick)
+}
+
+func (a *App) scheduleList(ctx context.Context, args []string) error {
+	tasks := a.Scheduler.Tasks()
+	if len(tasks) == 0 {
+		fmt.Println("No scheduled tasks.")
+		return nil
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(tw, "TASK\tEVERY\tAT\tOVERLAP")
+	for _, t := range tasks {
+		at := t.At
+		if at == "" {
+			at = "-"
+		}
+		overlap := "no"
+		if t.AllowOverlap {
+			overlap = "yes"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", t.Name, t.Every, at, overlap)
+	}
+	return tw.Flush()
+}

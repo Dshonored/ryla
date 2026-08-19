@@ -1,0 +1,59 @@
+package models
+
+import (
+	"go.mongodb.org/mongo-driver/v2/bson"
+
+	rymongo "{{.RylaModule}}/mongo"
+)
+
+// {{.Pascal}}Collection is where {{.KebabPlural}} are stored. It is a constant
+// because the index below is declared from init, before any {{.Pascal}} exists
+// to be asked where it lives.
+const {{.Pascal}}Collection = "{{.Table}}"
+
+// {{.Pascal}} is one document in the {{.Table}} collection.
+//
+// The bson tags are the field names as MongoDB actually stores them, and they
+// are what every query, index and shell command has to match. The Go field name
+// is not, so renaming a field without its tag changes nothing on the server.
+//
+// Add your fields below, then run `ry migrate` to create the indexes. Read and
+// write through a typed collection:
+//
+//	docs := rymongo.For[{{.Pascal}}](a.DB, {{.Pascal}}Collection)
+//	one, err := docs.FindByID(ctx, id)
+type {{.Pascal}} struct {
+	// omitempty is what lets the server mint the id on insert: a zero ObjectID
+	// written out literally would make every new document collide on _id.
+	ID bson.ObjectID `bson:"_id,omitempty" json:"id"`
+
+	// Inline, so created_at and updated_at are top-level fields. Nested in a
+	// subdocument they would still store, but every query and index would have
+	// to reach through a level that buys nothing.
+	rymongo.Timestamps `bson:",inline"`
+}
+
+func init() {
+	rymongo.Register(
+		// Newest first is how a listing is nearly always read, and without an
+		// index MongoDB sorts the whole collection in memory and refuses once
+		// that passes its limit.
+		rymongo.Index{
+			Collection: {{.Pascal}}Collection,
+			Keys: bson.D{
+				{Key: "created_at", Value: -1},
+			},
+			Name: "{{.Table}}_created_at",
+		},
+		// A field that must be unique needs the index to say so. Checking first
+		// is not enough on its own: two concurrent writers can both pass the
+		// check, and only the index rejects the second write.
+		//
+		//	rymongo.Index{
+		//	    Collection: {{.Pascal}}Collection,
+		//	    Keys:       bson.D{{"{"}}{Key: "slug", Value: 1}},
+		//	    Name:       "{{.Table}}_slug",
+		//	    Unique:     true,
+		//	},
+	)
+}

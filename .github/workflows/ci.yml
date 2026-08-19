@@ -74,6 +74,10 @@ jobs:
       - name: Test against MongoDB
         env:
           MONGO_TEST_URI: mongodb://localhost:27017
-        # -run Live so a skip caused by a missing URI cannot hide here: these
-        # are the tests this job exists for, and -v shows whether they ran.
-        run: go test ./mongo/ -run Live -v
+        # Every package with a MongoDB driver, not just mongo/ — the stores hold
+        # most of the live tests, and running only mongo/ would leave them
+        # skipping everywhere and testing nothing.
+        #
+        # -run Live so a skip caused by a missing URI cannot hide here, and -v
+        # so the log shows they genuinely ran.
+        run: go test ./mongo/ ./cache/mongo/ ./session/mongo/ ./queue/mongo/ -run Live -v

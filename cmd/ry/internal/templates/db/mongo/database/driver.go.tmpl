@@ -1,0 +1,24 @@
+// Package database holds the MongoDB connection settings this project was
+// generated with.
+//
+// It is the counterpart to the SQL overlay's package of the same name and it
+// deliberately registers nothing. There is one MongoDB driver and no dialect to
+// tell the framework about, so this is only where the defaults live: config
+// reads them, and nothing else needs to know where they came from.
+package database
+
+// Driver names the database this project was generated for. Configuration and
+// the welcome page report it; nothing dispatches on it.
+const Driver = "mongo"
+
+// DefaultURI points at a local server and names the database in its path.
+//
+// The path is where hosting providers put the database name too, which is why
+// it is preferred over a second setting: one string pasted from a provider is
+// enough to connect.
+const DefaultURI = {{.DefaultDSN | quote}}
+
+// DefaultDatabase is empty on purpose. The name comes from DefaultURI's path
+// unless MONGO_DATABASE overrides it, and naming it in two places is how the
+// two come to disagree.
+const DefaultDatabase = ""
