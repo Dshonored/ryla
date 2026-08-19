@@ -37,6 +37,12 @@ storage/        database file, logs, build scratch
 cmd/app/        the binary's entrypoint
 ```
 
+## Working with coding agents
+
+[AGENTS.md](AGENTS.md) describes the layout, the conventions and which files are
+generated, so Claude Code, Cursor and similar tools do not hand-edit `*_templ.go`
+or rewrite `routes/web.go`. `CLAUDE.md` points at the same file.
+
 ## Deploying
 
 `ry build` produces one static binary with the views and static assets compiled

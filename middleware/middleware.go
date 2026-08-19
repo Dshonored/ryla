@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"runtime/debug"
 	"time"
+
+	rylog "github.com/Dshonored/ryla/log"
 )
 
 type ctxKey int
@@ -75,17 +77,21 @@ func Logger(log *slog.Logger) func(http.Handler) http.Handler {
 			if l == slog.Default() {
 				l = log
 			}
+			// Logged as a real time.Duration rather than a preformatted
+			// string so each handler can render it its own way: the console
+			// handler aligns and colours it, the JSON handler emits nanoseconds
+			// that a log pipeline can aggregate.
 			attrs := []any{
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", rec.status,
 				"bytes", rec.written,
-				"duration", time.Since(start).Round(time.Microsecond).String(),
+				slog.Duration("duration", time.Since(start)),
 			}
 			if rec.status >= http.StatusInternalServerError {
-				l.Warn("request", attrs...)
+				l.Warn(rylog.RequestMessage, attrs...)
 			} else {
-				l.Info("request", attrs...)
+				l.Info(rylog.RequestMessage, attrs...)
 			}
 		})
 	}

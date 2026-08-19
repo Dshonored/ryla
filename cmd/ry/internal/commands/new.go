@@ -22,11 +22,12 @@ const rylaModule = scaffold.RylaModule
 
 func newCmd() *cobra.Command {
 	var (
-		module   string
-		database string
-		web      string
-		noPrompt bool
-		skipDeps bool
+		module    string
+		database  string
+		web       string
+		noPrompt  bool
+		skipDeps  bool
+		framework string
 	)
 
 	cmd := &cobra.Command{
@@ -52,7 +53,7 @@ explicitly to skip the prompts, which is what you want in scripts and CI.
 				return err
 			}
 
-			return runNew(cmd.Context(), cmd.OutOrStdout(), a, skipDeps)
+			return runNew(cmd.Context(), cmd.OutOrStdout(), a, skipDeps, framework)
 		},
 	}
 
@@ -62,6 +63,7 @@ explicitly to skip the prompts, which is what you want in scripts and CI.
 	f.StringVar(&web, "web", "", "web mode: "+strings.Join(availableWebModeNames(), ", "))
 	f.BoolVarP(&noPrompt, "yes", "y", false, "accept defaults instead of prompting")
 	f.BoolVar(&skipDeps, "skip-deps", false, "do not resolve dependencies or generate view code")
+	f.StringVar(&framework, "framework", "", "path to a local Ryla checkout to build against instead of the published module")
 
 	return cmd
 }
@@ -159,7 +161,7 @@ func runForm(form *huh.Form) error {
 	return nil
 }
 
-func runNew(ctx context.Context, out io.Writer, a answers, skipDeps bool) error {
+func runNew(ctx context.Context, out io.Writer, a answers, skipDeps bool, framework string) error {
 	if err := validateName(a.Name); err != nil {
 		return err
 	}
@@ -176,13 +178,27 @@ func runNew(ctx context.Context, out io.Writer, a answers, skipDeps bool) error 
 	}
 
 	frameworkVersion := Version()
+
 	local := ""
-	if IsDevVersion() {
+	switch {
+	case framework != "":
+		abs, err := filepath.Abs(framework)
+		if err != nil {
+			return err
+		}
+		if !isFrameworkRoot(abs) {
+			return fmt.Errorf("%s is not a Ryla checkout (its go.mod does not declare module %s)", abs, rylaModule)
+		}
+		local = abs
+
+	case IsDevVersion():
 		local = frameworkPath()
 		if local == "" {
 			return fmt.Errorf(
-				"this is an untagged development build of ry, so a generated project cannot fetch %s from the module proxy.\n"+
-					"Set RYLA_PATH to your local framework checkout, or install a tagged release",
+				"this build of ry was compiled from a working tree, so its code is not on the module "+
+					"proxy and a generated project could not build against it.\n\n"+
+					"Point it at your checkout with --framework <path>, set RYLA_PATH, or install a release:\n"+
+					"  go install %s/cmd/ry@latest",
 				rylaModule)
 		}
 	}

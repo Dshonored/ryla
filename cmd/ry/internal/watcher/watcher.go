@@ -54,6 +54,22 @@ type Runner struct {
 	// can trigger several builds.
 	Debounce time.Duration
 	Out      io.Writer
+
+	// Addr is the address the server was resolved to, shown in the banner.
+	Addr string
+	// Version is the ry version, shown in the banner.
+	Version string
+	// NoColor disables colour in the dev output.
+	NoColor bool
+	// Notice is an optional one-line message shown under the banner, used for
+	// the update nudge.
+	Notice string
+	// Env holds extra KEY=VALUE entries for the application process.
+	Env []string
+
+	ui        *ui
+	started   bool
+	watchedNo int
 }
 
 // Run blocks until ctx is cancelled.
@@ -68,6 +84,8 @@ func (r *Runner) Run(ctx context.Context) error {
 		r.Args = []string{"serve"}
 	}
 
+	r.ui = newUI(r.Out, r.NoColor)
+
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("create file watcher: %w", err)
@@ -78,28 +96,30 @@ func (r *Runner) Run(ctx context.Context) error {
 	if err := addDirs(fsw, r.Project.Root, ignores); err != nil {
 		return err
 	}
+	r.watchedNo = countWatched(r.Project.Root, ignores)
 
 	proc := &process{
 		bin:  r.Project.DevBinaryPath(),
 		args: r.Args,
 		dir:  r.Project.Root,
 		out:  r.Out,
+		env:  r.Env,
 	}
 	defer proc.stop()
 
-	r.printf("watching %s", r.Project.Root)
-	r.rebuild(ctx, proc)
+	r.rebuild(ctx, proc, "")
 
 	// A single timer, reset on every event, is what collapses an editor's burst
 	// of writes into one rebuild.
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
 	pending := false
+	trigger := ""
 
 	for {
 		select {
 		case <-ctx.Done():
-			r.printf("stopping")
+			r.ui.info("stopping")
 			return nil
 
 		case event, ok := <-fsw.Events:
@@ -117,20 +137,21 @@ func (r *Runner) Run(ctx context.Context) error {
 				}
 			}
 			pending = true
+			trigger = relTrigger(r.Project.Root, event.Name)
 			timer.Reset(r.Debounce)
 
 		case err, ok := <-fsw.Errors:
 			if !ok {
 				return nil
 			}
-			r.printf("watch error: %v", err)
+			r.ui.warn("watch error: %v", err)
 
 		case <-timer.C:
 			if !pending {
 				continue
 			}
 			pending = false
-			r.rebuild(ctx, proc)
+			r.rebuild(ctx, proc, trigger)
 		}
 	}
 }
@@ -156,7 +177,7 @@ func (r *Runner) relevant(event fsnotify.Event, ignores []string) bool {
 	return watchedExtensions[strings.ToLower(filepath.Ext(name))]
 }
 
-func (r *Runner) rebuild(ctx context.Context, proc *process) {
+func (r *Runner) rebuild(ctx context.Context, proc *process, trigger string) {
 	start := time.Now()
 
 	// The old process must be gone before the build runs: on Windows the
@@ -164,27 +185,35 @@ func (r *Runner) rebuild(ctx context.Context, proc *process) {
 	proc.stop()
 
 	if err := toolchain.Templ(ctx, r.Project); err != nil {
-		r.printf("templ failed: %v", err)
+		r.ui.warn("templ failed: %v", err)
 		return
 	}
 
-	err := toolchain.Build(ctx, r.Project, toolchain.BuildOptions{Output: r.Project.DevBinaryPath()})
-	if err != nil {
+	if err := toolchain.Build(ctx, r.Project, toolchain.BuildOptions{Output: r.Project.DevBinaryPath()}); err != nil {
 		// A compile error is the normal case while editing, not a reason to
-		// stop watching. The next save gets another try.
-		r.printf("build failed")
+		// stop watching. The compiler has already printed the details.
+		r.ui.buildFailed(trigger)
 		return
+	}
+
+	took := time.Since(start)
+
+	// Printed before the process starts, not after: the child writes its own
+	// startup line as soon as it binds, and a banner printed afterwards would
+	// race with it and arrive split down the middle.
+	if !r.started {
+		r.started = true
+		r.ui.banner(r.Version, r.Addr, r.watchedNo, took)
+		if r.Notice != "" {
+			r.ui.notice(r.Notice)
+		}
+	} else {
+		r.ui.reloaded(took, trigger)
 	}
 
 	if err := proc.start(ctx); err != nil {
-		r.printf("start failed: %v", err)
-		return
+		r.ui.warn("could not start the server: %v", err)
 	}
-	r.printf("rebuilt in %s", time.Since(start).Round(time.Millisecond))
-}
-
-func (r *Runner) printf(format string, args ...any) {
-	fmt.Fprintf(r.Out, "[ry] "+format+"\n", args...)
 }
 
 // process supervises the running application binary.
@@ -193,6 +222,7 @@ type process struct {
 	args []string
 	dir  string
 	out  io.Writer
+	env  []string
 
 	mu  sync.Mutex
 	cmd *exec.Cmd
@@ -206,6 +236,9 @@ func (p *process) start(ctx context.Context) error {
 	cmd.Dir = p.dir
 	cmd.Stdout = p.out
 	cmd.Stderr = p.out
+	if len(p.env) > 0 {
+		cmd.Env = append(os.Environ(), p.env...)
+	}
 	configureProcess(cmd)
 
 	if err := cmd.Start(); err != nil {
@@ -289,4 +322,30 @@ func ignored(root, path string, ignores []string) bool {
 		}
 	}
 	return false
+}
+
+// countWatched counts the source files the watcher is responsible for, purely
+// so the banner can say something truthful about the size of the project.
+func countWatched(root string, ignores []string) int {
+	count := 0
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr
+		}
+		if d.IsDir() {
+			if path != root && ignored(root, path, ignores) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := d.Name()
+		if strings.HasSuffix(name, "_templ.go") {
+			return nil
+		}
+		if watchedExtensions[strings.ToLower(filepath.Ext(name))] {
+			count++
+		}
+		return nil
+	})
+	return count
 }

@@ -39,10 +39,17 @@ func (c Core) IsProduction() bool { return c.Env == EnvProduction }
 // IsLocal reports whether the app is running in the local environment.
 func (c Core) IsLocal() bool { return c.Env == EnvLocal }
 
-// Load reads the given dotenv files into the process environment. Values
-// already present in the environment always win, so real environment variables
-// override the contents of a .env file. Missing files are not an error, which
-// is what makes the same call work in development and in production.
+// Load reads the given dotenv files into the process environment.
+//
+// Values already present in the environment always win, so a real environment
+// variable overrides the contents of a .env file. That ordering matters: a
+// container or CI job injecting DB_DSN must not be quietly overruled by a
+// checked-out .env, and `ry dev` relies on it to switch the log format of the
+// process it supervises. godotenv.Load has these semantics; godotenv.Overload
+// has the opposite ones.
+//
+// Missing files are not an error, which is what makes the same call work in
+// development, where .env exists, and in production, where it usually does not.
 func Load(paths ...string) error {
 	if len(paths) == 0 {
 		paths = []string{".env"}
@@ -51,7 +58,7 @@ func Load(paths ...string) error {
 		if _, err := os.Stat(p); err != nil {
 			continue
 		}
-		if err := godotenv.Overload(p); err != nil {
+		if err := godotenv.Load(p); err != nil {
 			return err
 		}
 	}

@@ -1,0 +1,94 @@
+# {{.Name}} — notes for coding agents
+
+A [Ryla](https://github.com/Dshonored/ryla) application. Go {{.GoVersion}},
+module `{{.Module}}`, {{.DB}} database, `{{.Web}}` web mode.
+
+## Commands
+
+| Task | Command |
+| --- | --- |
+| Run with live reload | `ry dev` |
+| Build one static binary | `ry build` |
+| Apply migrations | `ry migrate` |
+| Roll back the last batch | `ry migrate:rollback` |
+| Show migration state | `ry migrate:status` |
+| List named routes | `ry routes` |
+| Run tests | `go test ./...` |
+
+Prefer `ry` over raw `go run`: it regenerates view code first, which the build
+needs. `ry` commands accept `--json` where there is something to parse.
+
+## Do not edit these
+
+- **`*_templ.go`** — generated from the neighbouring `.templ` file by
+  `templ generate`. Edit the `.templ` and rebuild; changes here are erased.
+- **`storage/`** — the database file, logs and build scratch. Not source.
+- **`go.sum`** — managed by `go mod tidy`.
+
+## Conventions that matter
+
+**Wiring is explicit.** There is no service container and nothing resolves at
+runtime. `app.App` is a plain struct built in `app/app.go`; controllers hold a
+`*app.App` and reach for what they need. To add a dependency, add a field to
+`App` and set it in `New` — do not introduce a global or a singleton.
+
+**Routes are hand-written.** `routes/web.go` is the table of contents for this
+application. `ry make:controller` deliberately does not edit it; it prints the
+lines to add. Keep it that way — a route table you cannot trust to be complete
+is worse than no route table.
+
+**Migrations are immutable once run.** Each one registers itself from `init` and
+carries its own schema snapshot struct rather than referencing a model in
+`app/models`. That is intentional: a migration must keep doing what it did the
+day it was written. Never edit a migration that has already been applied
+anywhere — add a new one with `ry make:migration`.
+
+**Config is read explicitly.** `config/config.go` lists every setting, its
+environment variable and its default in one place. Add new settings there with
+the typed readers (`ryconfig.String`, `.Int`, `.Bool`, `.Duration`) rather than
+calling `os.Getenv` from the code that uses them.
+
+**Real environment variables beat `.env`.** `.env` fills in what the environment
+has not already set, never the reverse.
+
+**Views are compiled.** `.templ` files become Go, so a typo or a wrong argument
+is a build error rather than a blank page. Render through the controller's
+`Render` helper, which buffers output so a failed render becomes a clean 500
+instead of half a page.
+
+## Layout
+
+```
+app/controllers/   HTTP handlers; embed Base for Render/JSON/Redirect
+app/models/        GORM models
+app/middleware/    application middleware (framework middleware is in app.New)
+config/            typed settings
+database/migrations/  self-registering, timestamped
+database/seeders/  ordered, called from Run
+resources/views/   .templ components
+resources/static/  embedded into the binary
+routes/            the route table
+cmd/app/           entrypoint: build the app, register routes, run
+```
+
+## Generators
+
+```bash
+ry make:model Post                 # model + create-table migration
+ry make:controller Posts --resource  # the seven CRUD handlers
+ry make:migration add_slug_to_posts
+ry make:middleware EnsureAdmin
+ry make:seeder Users
+```
+
+Names may be given singular or plural; `Post` and `Posts` both produce the
+`posts` table and `/posts` routes.
+
+## Before you finish
+
+```bash
+ry build && go test ./...
+```
+
+`ry build` runs view generation, so it catches template errors that `go build`
+alone will not.

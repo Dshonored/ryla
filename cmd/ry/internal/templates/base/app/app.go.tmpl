@@ -42,9 +42,10 @@ func New() (*App, error) {
 	cfg := config.Load()
 
 	logger := rylog.New(rylog.Options{
-		Level:  cfg.Log.Level,
-		JSON:   cfg.Log.JSON,
-		Source: cfg.Log.Source,
+		Level:   cfg.Log.Level,
+		Format:  rylog.ParseFormat(cfg.Log.Format),
+		Source:  cfg.Log.Source,
+		NoColor: cfg.Log.NoColor,
 	})
 	// Make the configured logger the default too, so any library reaching for
 	// slog.Default lands in the same output stream.

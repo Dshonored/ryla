@@ -34,9 +34,10 @@ type Database struct {
 
 // Log describes logger output.
 type Log struct {
-	Level  string
-	JSON   bool
-	Source bool
+	Level   string
+	Format  string
+	Source  bool
+	NoColor bool
 }
 
 // LoadEnv reads .env files into the process environment. Real environment
@@ -46,13 +47,12 @@ func LoadEnv(paths ...string) error { return ryconfig.Load(paths...) }
 // Load builds the configuration from the environment.
 func Load() *Config {
 	env := ryconfig.String("APP_ENV", ryconfig.EnvLocal)
-	production := env == ryconfig.EnvProduction
 
 	return &Config{
 		Core: ryconfig.Core{
 			Name:  ryconfig.String("APP_NAME", "{{.Name}}"),
 			Env:   env,
-			Debug: ryconfig.Bool("APP_DEBUG", !production),
+			Debug: ryconfig.Bool("APP_DEBUG", env != ryconfig.EnvProduction),
 			URL:   ryconfig.String("APP_URL", "http://localhost:8080"),
 			Addr:  ryconfig.String("APP_ADDR", ":8080"),
 			Key:   ryconfig.String("APP_KEY", ""),
@@ -67,9 +67,13 @@ func Load() *Config {
 			LogQueries:      ryconfig.Bool("DB_LOG_QUERIES", false),
 		},
 		Log: Log{
-			Level:  ryconfig.String("LOG_LEVEL", "info"),
-			JSON:   ryconfig.Bool("LOG_JSON", production),
-			Source: ryconfig.Bool("LOG_SOURCE", false),
+			// auto renders a compact coloured console when attached to a
+			// terminal and JSON otherwise, so local runs are readable and
+			// deployed ones stay parsable with no configuration either way.
+			Level:   ryconfig.String("LOG_LEVEL", "info"),
+			Format:  ryconfig.String("LOG_FORMAT", "auto"),
+			Source:  ryconfig.Bool("LOG_SOURCE", false),
+			NoColor: ryconfig.Bool("NO_COLOR", false),
 		},
 	}
 }

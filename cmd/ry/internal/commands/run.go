@@ -13,6 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	rylog "github.com/Dshonored/ryla/log"
+
 	"github.com/Dshonored/ryla/cmd/ry/internal/project"
 	"github.com/Dshonored/ryla/cmd/ry/internal/toolchain"
 	"github.com/Dshonored/ryla/cmd/ry/internal/watcher"
@@ -55,11 +57,25 @@ instead.`,
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
+			// The application writes to a pipe, not a terminal, so it cannot
+			// work out for itself that a human is watching. The parent can, so
+			// it says so explicitly — otherwise `ry dev` would show the JSON
+			// output meant for log aggregators.
+			env := []string{"LOG_FORMAT=console"}
+			if !noColor && rylog.ColorEnabled(os.Stdout) {
+				env = append(env, "FORCE_COLOR=1")
+			}
+
 			r := &watcher.Runner{
 				Project:  p,
 				Args:     args,
 				Debounce: debounce,
 				Out:      out,
+				Addr:     listenAddr,
+				Version:  DisplayVersion(),
+				NoColor:  noColor,
+				Env:      env,
+				Notice:   updateNotice(cmd.Context()),
 			}
 			return r.Run(ctx)
 		},
