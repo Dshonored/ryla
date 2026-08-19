@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # The generated project has to build on the platforms it is developed
+        # on. Windows earns its place here: the dev watcher's process handling
+        # and the CRLF trap in the templates are both Windows-only failures.
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      # This is the important one: it scaffolds every (database x web mode)
+      # combination into a temp directory and checks the result builds, vets
+      # and is gofmt-clean. Templates are text, so nothing else catches a
+      # broken one.
+      - name: Test
+        run: go test ./...

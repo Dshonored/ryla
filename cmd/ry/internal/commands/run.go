@@ -20,8 +20,9 @@ import (
 
 func devCmd() *cobra.Command {
 	var (
-		addr     string
-		debounce time.Duration
+		addr       string
+		debounce   time.Duration
+		strictPort bool
 	)
 
 	cmd := &cobra.Command{
@@ -30,18 +31,26 @@ func devCmd() *cobra.Command {
 		Long: `Watch the project, regenerate views, rebuild and restart the server
 whenever a source file changes.
 
-A compile error does not stop the watcher: fix the file and save again.`,
+A compile error does not stop the watcher: fix the file and save again.
+
+If the port is already taken, dev moves to the next free one and says so, so a
+forgotten server elsewhere does not block you. Pass --strict-port to fail
+instead.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := currentProject()
 			if err != nil {
 				return err
 			}
+			out := cmd.OutOrStdout()
 
-			args := []string{"serve"}
-			if addr != "" {
-				args = append(args, "-addr", addr)
+			// Resolved once, then reused for every restart, so the URL in the
+			// browser stays put across rebuilds.
+			listenAddr, err := resolveDevAddr(p, addr, strictPort, out)
+			if err != nil {
+				return err
 			}
+			args := []string{"serve", "-addr", listenAddr}
 
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -50,7 +59,7 @@ A compile error does not stop the watcher: fix the file and save again.`,
 				Project:  p,
 				Args:     args,
 				Debounce: debounce,
-				Out:      cmd.OutOrStdout(),
+				Out:      out,
 			}
 			return r.Run(ctx)
 		},
@@ -58,6 +67,7 @@ A compile error does not stop the watcher: fix the file and save again.`,
 
 	cmd.Flags().StringVar(&addr, "addr", "", "address to listen on (overrides APP_ADDR)")
 	cmd.Flags().DurationVar(&debounce, "debounce", 300*time.Millisecond, "how long to wait for writes to settle")
+	cmd.Flags().BoolVar(&strictPort, "strict-port", false, "fail if the port is taken instead of using the next free one")
 	return cmd
 }
 
