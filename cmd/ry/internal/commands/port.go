@@ -74,7 +74,7 @@ func resolveDevAddr(p *project.Project, requested string, strict bool, out io.Wr
 	for next := port + 1; next <= port+portScanLimit && next <= 65535; next++ {
 		candidate := net.JoinHostPort(host, strconv.Itoa(next))
 		if probe(candidate) == nil {
-			fmt.Fprintf(out, "[ry] port %d is in use, listening on %d instead\n", port, next)
+			fmt.Fprintf(out, "\n  !  port %d is in use, listening on %d instead\n", port, next)
 			return candidate, nil
 		}
 	}
