@@ -208,3 +208,31 @@ func TestParseFormat(t *testing.T) {
 		}
 	}
 }
+
+// TestDeprecatedJSONOptionStillWorks pins backwards compatibility with
+// applications generated before Format existed. They set Options.JSON, and an
+// upgrade that stopped those compiling — or quietly changed their log format —
+// would teach people not to run `ry update`.
+func TestDeprecatedJSONOptionStillWorks(t *testing.T) {
+	var buf bytes.Buffer
+
+	// Exactly the call a v0.1.0 generated app makes.
+	log := New(Options{Level: "info", JSON: true, Source: false, Output: &buf})
+	log.Info("hello", "k", "v")
+
+	got := buf.String()
+	if !strings.HasPrefix(strings.TrimSpace(got), "{") {
+		t.Errorf("Options.JSON did not select the JSON handler\ngot: %s", got)
+	}
+}
+
+func TestExplicitFormatBeatsDeprecatedJSON(t *testing.T) {
+	var buf bytes.Buffer
+
+	log := New(Options{Level: "info", JSON: true, Format: FormatConsole, Output: &buf})
+	log.Info("hello")
+
+	if strings.HasPrefix(strings.TrimSpace(buf.String()), "{") {
+		t.Error("an explicit Format should win over the deprecated JSON field")
+	}
+}

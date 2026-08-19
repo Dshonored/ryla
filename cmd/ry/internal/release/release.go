@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -30,30 +31,89 @@ type Info struct {
 }
 
 // Latest asks the proxy for the newest version of module.
+//
+// Both proxy endpoints are consulted and the higher version wins. They are
+// cached independently and go stale at different rates: after a new tag is
+// pushed, @v/list often knows about it while @latest still reports the previous
+// release, and sometimes the reverse. Taking the maximum means a fresh release
+// is noticed as soon as either endpoint catches up, instead of waiting for the
+// slower one.
 func Latest(ctx context.Context, module string) (Info, error) {
-	base := proxyBase()
-	url := fmt.Sprintf("%s/%s/@latest", strings.TrimRight(base, "/"), escapeModule(module))
+	latest, latestErr := latestEndpoint(ctx, module)
+	listed, listErr := highestListed(ctx, module)
+
+	switch {
+	case latestErr != nil && listErr != nil:
+		return Info{}, latestErr
+	case latestErr != nil:
+		return listed, nil
+	case listErr != nil:
+		return latest, nil
+	}
+
+	if semver.IsValid(listed.Version) && semver.Compare(listed.Version, latest.Version) > 0 {
+		return listed, nil
+	}
+	return latest, nil
+}
+
+// latestEndpoint reads the proxy's @latest.
+func latestEndpoint(ctx context.Context, module string) (Info, error) {
+	body, err := get(ctx, module, "@latest")
+	if err != nil {
+		return Info{}, err
+	}
+
+	var info Info
+	if err := json.Unmarshal(body, &info); err != nil {
+		return Info{}, fmt.Errorf("decode proxy response: %w", err)
+	}
+	return info, nil
+}
+
+// highestListed reads @v/list and returns the greatest stable version.
+// Pre-releases are skipped: nobody should be nudged onto a release candidate.
+func highestListed(ctx context.Context, module string) (Info, error) {
+	body, err := get(ctx, module, "@v/list")
+	if err != nil {
+		return Info{}, err
+	}
+
+	best := ""
+	for _, line := range strings.Split(string(body), "\n") {
+		v := strings.TrimSpace(line)
+		if !semver.IsValid(v) || semver.Prerelease(v) != "" {
+			continue
+		}
+		if best == "" || semver.Compare(v, best) > 0 {
+			best = v
+		}
+	}
+	if best == "" {
+		return Info{}, fmt.Errorf("no stable versions listed for %s", module)
+	}
+	return Info{Version: best}, nil
+}
+
+func get(ctx context.Context, module, endpoint string) ([]byte, error) {
+	url := fmt.Sprintf("%s/%s/%s",
+		strings.TrimRight(proxyBase(), "/"), escapeModule(module), endpoint)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return Info{}, err
+		return nil, err
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return Info{}, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return Info{}, fmt.Errorf("module proxy returned %s for %s", resp.Status, module)
+		return nil, fmt.Errorf("module proxy returned %s for %s%s", resp.Status, module, endpoint)
 	}
-
-	var info Info
-	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
-		return Info{}, fmt.Errorf("decode proxy response: %w", err)
-	}
-	return info, nil
+	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }
 
 // Cached returns the newest version, reusing a recent lookup when there is one.

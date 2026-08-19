@@ -51,6 +51,14 @@ type Options struct {
 	// NoColor forces colour off even on a terminal. Colour is also disabled
 	// automatically by NO_COLOR, TERM=dumb, CI, or a non-terminal destination.
 	NoColor bool
+
+	// JSON forces JSON output.
+	//
+	// Deprecated: set Format to FormatJSON instead. This field predates Format
+	// and is kept because applications generated before Format existed set it,
+	// and an upgrade that stops those compiling would make `ry update` a thing
+	// people learn to avoid. It is honoured whenever Format is left at auto.
+	JSON bool
 }
 
 // New builds a *slog.Logger from opts.
@@ -68,6 +76,11 @@ func New(opts Options) *slog.Logger {
 	format := opts.Format
 	if format == "" {
 		format = FormatAuto
+	}
+	// The deprecated JSON field only speaks when Format has nothing to say, so
+	// an explicit Format always wins.
+	if opts.JSON && format == FormatAuto {
+		format = FormatJSON
 	}
 	if format == FormatAuto {
 		if isTerminal(out) {
