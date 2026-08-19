@@ -1,10 +1,13 @@
 package auth
 
 import (
+	"encoding/base64"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -206,5 +209,69 @@ func TestCheckRequest(t *testing.T) {
 
 	if !authenticated {
 		t.Error("CheckRequest = false for an authenticated request")
+	}
+}
+
+func TestTokenRoundTrip(t *testing.T) {
+	s := NewSigner("test-key")
+
+	token := s.Sign(PurposeVerifyEmail, "42", time.Hour)
+	subject, err := s.Verify(PurposeVerifyEmail, token)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if subject != "42" {
+		t.Errorf("subject = %q, want 42", subject)
+	}
+}
+
+// TestTokenIsBoundToItsPurpose is why purpose is part of the signature: a link
+// that verifies an email address must not be replayable to reset a password.
+func TestTokenIsBoundToItsPurpose(t *testing.T) {
+	s := NewSigner("test-key")
+	token := s.Sign(PurposeVerifyEmail, "42", time.Hour)
+
+	if _, err := s.Verify(PurposeResetPassword, token); !errors.Is(err, ErrTokenInvalid) {
+		t.Errorf("a verification token was accepted for a password reset: %v", err)
+	}
+}
+
+func TestExpiredTokenIsRejected(t *testing.T) {
+	s := NewSigner("test-key")
+	token := s.Sign(PurposeVerifyEmail, "42", -time.Second)
+
+	if _, err := s.Verify(PurposeVerifyEmail, token); !errors.Is(err, ErrTokenExpired) {
+		t.Errorf("Verify = %v, want ErrTokenExpired", err)
+	}
+}
+
+func TestTamperedTokenIsRejected(t *testing.T) {
+	s := NewSigner("test-key")
+	token := s.Sign(PurposeVerifyEmail, "42", time.Hour)
+
+	// Swap the subject for another user's id, keeping the signature.
+	_, rest, _ := strings.Cut(token, ".")
+	forged := base64.RawURLEncoding.EncodeToString([]byte("1")) + "." + rest
+
+	if _, err := s.Verify(PurposeVerifyEmail, forged); !errors.Is(err, ErrTokenInvalid) {
+		t.Errorf("a token pointing at another user was accepted: %v", err)
+	}
+}
+
+func TestTokenFromAnotherKeyIsRejected(t *testing.T) {
+	token := NewSigner("key-one").Sign(PurposeVerifyEmail, "42", time.Hour)
+
+	if _, err := NewSigner("key-two").Verify(PurposeVerifyEmail, token); err == nil {
+		t.Error("a token signed with a different key was accepted")
+	}
+}
+
+func TestMalformedTokens(t *testing.T) {
+	s := NewSigner("test-key")
+
+	for _, token := range []string{"", "nodots", "one.two", "!!!.123.abc", "a.notanumber.c"} {
+		if _, err := s.Verify(PurposeVerifyEmail, token); err == nil {
+			t.Errorf("malformed token %q was accepted", token)
+		}
 	}
 }

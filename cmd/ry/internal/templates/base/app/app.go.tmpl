@@ -14,11 +14,13 @@ import (
 
 	"gorm.io/gorm"
 
+	"{{.RylaModule}}/auth"
 	"{{.RylaModule}}/cookie"
 	"{{.RylaModule}}/csrf"
 	rydb "{{.RylaModule}}/db"
 	"{{.RylaModule}}/flash"
 	rylog "{{.RylaModule}}/log"
+	"{{.RylaModule}}/mail"
 	"{{.RylaModule}}/middleware"
 	"{{.RylaModule}}/queue"
 	"{{.RylaModule}}/router"
@@ -49,6 +51,8 @@ type App struct {
 	Flash   *flash.Store
 	Session session.Store
 	Queue   *queue.Dispatcher
+	Mail    mail.Mailer
+	Signer  *auth.Signer
 }
 
 // New builds the application: configuration, logging, database, cookies and the
@@ -117,6 +121,20 @@ func New() (*App, error) {
 		},
 	}))
 
+	dispatcher := queue.NewDispatcher(queue.NewDBDriver(gdb))
+
+	// The queued mailer hands messages to a worker; the underlying one does the
+	// delivering. Both are needed: the worker rebuilds the job from JSON and
+	// has no way to be given a mailer, so the job reaches for the registered
+	// one.
+	delivery := buildMailer(cfg, logger)
+	mail.RegisterJob(delivery)
+
+	mailer := delivery
+	if cfg.Mail.Queue {
+		mailer = mail.NewQueued(dispatcher)
+	}
+
 	return &App{
 		Config:  cfg,
 		Log:     logger,
@@ -125,8 +143,29 @@ func New() (*App, error) {
 		Cookies: jar,
 		Flash:   flash.New(jar),
 		Session: sessions,
-		Queue:   queue.NewDispatcher(queue.NewDBDriver(gdb)),
+		Queue:   dispatcher,
+		Mail:    mailer,
+		Signer:  auth.NewSigner(key),
 	}, nil
+}
+
+// buildMailer picks the delivery mechanism from configuration.
+func buildMailer(cfg *config.Config, logger *slog.Logger) mail.Mailer {
+	if cfg.Mail.Driver != "smtp" {
+		return mail.NewLog(logger)
+	}
+	return mail.NewSMTP(mail.SMTPConfig{
+		Host:       cfg.Mail.Host,
+		Port:       cfg.Mail.Port,
+		Username:   cfg.Mail.Username,
+		Password:   cfg.Mail.Password,
+		Encryption: mail.ParseEncryption(cfg.Mail.Encryption),
+	})
+}
+
+// From is the address messages are sent from.
+func (a *App) From() mail.Address {
+	return mail.Address{Name: a.Config.Mail.FromName, Email: a.Config.Mail.FromAddress}
 }
 
 // signingKey resolves APP_KEY, refusing to start without one in production.

@@ -110,10 +110,23 @@ trustProxy to true only behind a proxy that overwrites X-Forwarded-For;
 anywhere else a caller can change the header on every request and never be
 limited at all.
 
-**Registration still reveals whether an email is registered**, which login
-deliberately does not. Closing that needs mail: answer "check your inbox" either
-way, then send a welcome or a "you already have an account" message. Rate
-limiting makes harvesting impractical in the meantime.
+**Registration does not reveal whether an email is registered.** It answers
+"check your inbox" every time and puts the difference in the email — a
+confirmation link for a new address, a "you already have an account" note for an
+existing one. That is also why signup does not sign you in: doing so would make
+a successful registration observably different from one that hit an existing
+address, which is the whole leak. Following the emailed link proves control of
+the address, and that is what signs the account in.
+
+**Mail.** `a.Mail.Send(ctx, msg)` with messages built in `app/mails`. The log
+driver is the default outside production and prints the plain-text body, so
+confirmation and reset links are reachable locally. `MAIL_QUEUE=true` sends via
+a worker (`ry queue:work -queue mail`), so a slow mail server never delays a
+response.
+
+**Signed links.** `a.Signer.Sign(purpose, subject, ttl)` issues a token that
+needs no database row, and the purpose is part of the signature, so a link that
+confirms an address cannot be replayed to reset a password.
 
 **Background work goes in `app/jobs`.** A job is a struct whose exported
 fields are its payload, serialised on dispatch and restored before it runs.

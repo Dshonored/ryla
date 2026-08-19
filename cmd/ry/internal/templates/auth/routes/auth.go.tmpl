@@ -29,6 +29,9 @@ func RegisterAuth(a *app.App) {
 
 		r.Get("/register", auth.ShowRegister).Name("register")
 		r.Get("/login", auth.ShowLogin).Name("login")
+		// Following the emailed link proves control of the address, which is
+		// what signs the new account in.
+		r.Get("/verify", auth.Verify).Name("verify")
 
 		// Only the submissions are throttled.
 		//

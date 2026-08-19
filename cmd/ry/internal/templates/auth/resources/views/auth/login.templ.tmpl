@@ -2,6 +2,7 @@ package auth
 
 import (
 	"github.com/Dshonored/ryla/csrf"
+	"github.com/Dshonored/ryla/flash"
 	"github.com/Dshonored/ryla/validate"
 
 	"{{.Module}}/resources/views"
@@ -9,13 +10,16 @@ import (
 
 // LoginForm carries the sign-in form back after a failed attempt.
 type LoginForm struct {
-	Email  string
-	Errors validate.ErrorBag
+	Email    string
+	Errors   validate.ErrorBag
+	Messages []flash.Message
 }
 
 templ Login(form LoginForm) {
 	@views.Layout("Sign in") {
 		<div class="stack auth-card">
+			@views.Flashes(form.Messages)
+
 			<header class="stack-sm">
 				<h1>Sign in</h1>
 				<p class="muted small">

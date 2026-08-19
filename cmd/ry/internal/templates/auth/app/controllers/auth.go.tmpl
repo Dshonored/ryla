@@ -3,6 +3,7 @@ package controllers
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -11,11 +12,13 @@ import (
 
 	ryauth "{{.RylaModule}}/auth"
 	"{{.RylaModule}}/flash"
+	"{{.RylaModule}}/mail"
 	"{{.RylaModule}}/ratelimit"
 	"{{.RylaModule}}/session"
 	"{{.RylaModule}}/validate"
 
 	"{{.Module}}/app"
+	"{{.Module}}/app/mails"
 	"{{.Module}}/app/models"
 	"{{.Module}}/app/requests"
 	"{{.Module}}/resources/views/auth"
@@ -48,6 +51,14 @@ func (c *Auth) ShowRegister(w http.ResponseWriter, r *http.Request) {
 }
 
 // Register handles POST /register.
+//
+// The response is the same whether or not the address is already registered:
+// "check your inbox", every time. Saying "that email is already registered"
+// would hand anyone a way to discover which addresses have accounts — exactly
+// what the sign-in form refuses to reveal, given away by the form next to it.
+//
+// The person who owns the address still finds out what happened, because the
+// difference goes into the email rather than the page.
 func (c *Auth) Register(w http.ResponseWriter, r *http.Request) {
 	var form requests.Register
 
@@ -56,22 +67,7 @@ func (c *Auth) Register(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not read the submitted form.", http.StatusBadRequest)
 		return
 	}
-
 	form.Email = normalizeEmail(form.Email)
-
-	if !bag.Any() {
-		// Checking first gives a clear message; the unique index below is what
-		// actually guarantees it, since two simultaneous signups can both pass
-		// this check.
-		var count int64
-		if err := c.App.DB.Model(&models.User{}).Where("email = ?", form.Email).Count(&count).Error; err != nil {
-			c.serverError(w, r, "count users", err)
-			return
-		}
-		if count > 0 {
-			bag.Add("email", "That email address is already registered.")
-		}
-	}
 
 	if bag.Any() {
 		c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.Register(auth.RegisterForm{
@@ -80,27 +76,110 @@ func (c *Auth) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var existing models.User
+	err = c.App.DB.Where("email = ?", form.Email).First(&existing).Error
+
+	switch {
+	case err == nil:
+		// Already registered. Tell the owner of the address, not the browser.
+		c.sendAccountExists(r, existing)
+
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		if err := c.createUnverified(r, form); err != nil {
+			c.serverError(w, r, "create user", err)
+			return
+		}
+
+	default:
+		c.serverError(w, r, "look up user", err)
+		return
+	}
+
+	c.App.Flash.Add(w, r, flash.Info,
+		"Check your inbox — we have sent a link to "+form.Email+".")
+	c.Redirect(w, r, "/login")
+}
+
+// createUnverified stores the account and emails a confirmation link.
+//
+// The user is deliberately not signed in yet: doing so would make a successful
+// signup observably different from one that hit an existing address, which is
+// the leak this flow exists to close.
+func (c *Auth) createUnverified(r *http.Request, form requests.Register) error {
 	hash, err := ryauth.Hash(form.Password)
 	if err != nil {
-		c.serverError(w, r, "hash password", err)
-		return
+		return err
 	}
 
 	user := models.User{Name: form.Name, Email: form.Email, Password: hash}
 	if err := c.App.DB.Create(&user).Error; err != nil {
-		// The unique index rejecting a duplicate is a race with the check
-		// above, not a server fault.
+		// Two simultaneous signups can both pass the check above; the unique
+		// index settles it. The loser is treated as an existing account, which
+		// is the truth by then.
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
-			bag.Add("email", "That email address is already registered.")
-			c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.Register(auth.RegisterForm{
-				Name: form.Name, Email: form.Email, Errors: bag,
-			}))
-			return
+			c.sendAccountExists(r, user)
+			return nil
 		}
-		c.serverError(w, r, "create user", err)
+		return err
+	}
+
+	token := c.App.Signer.Sign(ryauth.PurposeVerifyEmail, strconv.FormatUint(uint64(user.ID), 10), 24*time.Hour)
+	link := c.App.Config.URL + "/verify?token=" + url.QueryEscape(token)
+
+	msg := mails.VerifyEmail(c.App.From(), mail.Address{Name: user.Name, Email: user.Email},
+		c.App.Config.Name, link)
+
+	if err := c.App.Mail.Send(r.Context(), msg); err != nil {
+		// The account exists; the email did not go out. Logging beats failing
+		// the signup — the address can be confirmed again later.
+		c.App.Log.Error("could not send the verification email", "error", err, "user", user.ID)
+	}
+	return nil
+}
+
+func (c *Auth) sendAccountExists(r *http.Request, user models.User) {
+	msg := mails.AccountExists(c.App.From(), mail.Address{Name: user.Name, Email: user.Email},
+		c.App.Config.Name, c.App.Config.URL+"/login")
+
+	if err := c.App.Mail.Send(r.Context(), msg); err != nil {
+		c.App.Log.Error("could not send the account-exists email", "error", err)
+	}
+}
+
+// Verify handles GET /verify.
+func (c *Auth) Verify(w http.ResponseWriter, r *http.Request) {
+	subject, err := c.App.Signer.Verify(ryauth.PurposeVerifyEmail, r.URL.Query().Get("token"))
+	if err != nil {
+		c.App.Flash.Add(w, r, flash.Error,
+			"That confirmation link is invalid or has expired. Sign up again to get a new one.")
+		c.Redirect(w, r, "/register")
 		return
 	}
 
+	id, err := strconv.ParseUint(subject, 10, 64)
+	if err != nil {
+		c.App.Flash.Add(w, r, flash.Error, "That confirmation link is not valid.")
+		c.Redirect(w, r, "/register")
+		return
+	}
+
+	var user models.User
+	if err := c.App.DB.First(&user, uint(id)).Error; err != nil {
+		c.App.Flash.Add(w, r, flash.Error, "That account no longer exists.")
+		c.Redirect(w, r, "/register")
+		return
+	}
+
+	if !user.Verified() {
+		now := time.Now()
+		if err := c.App.DB.Model(&user).Update("email_verified_at", now).Error; err != nil {
+			c.serverError(w, r, "mark the address verified", err)
+			return
+		}
+	}
+
+	// Confirming the link proves control of the address, so this is a fine
+	// moment to sign them in.
 	ryauth.LoginID(session.From(r.Context()), user.ID)
 	c.App.Flash.Add(w, r, flash.Success, "Welcome, "+user.Name+".")
 	c.Redirect(w, r, "/")
@@ -108,7 +187,9 @@ func (c *Auth) Register(w http.ResponseWriter, r *http.Request) {
 
 // ShowLogin handles GET /login.
 func (c *Auth) ShowLogin(w http.ResponseWriter, r *http.Request) {
-	c.Render(w, r, auth.Login(auth.LoginForm{}))
+	// Pulled here so the "check your inbox" message set by Register survives
+	// its redirect and is shown exactly once.
+	c.Render(w, r, auth.Login(auth.LoginForm{Messages: c.App.Flash.Pull(w, r)}))
 }
 
 // Login handles POST /login.

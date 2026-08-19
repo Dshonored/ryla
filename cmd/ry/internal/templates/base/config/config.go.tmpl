@@ -20,6 +20,25 @@ type Config struct {
 	DB      Database
 	Log     Log
 	Session Session
+	Mail    Mail
+}
+
+// Mail describes how email is sent.
+type Mail struct {
+	// Driver is smtp or log. The log driver prints instead of sending, which
+	// is what you want locally: a real send during development is at best a
+	// nuisance and at worst an email to a customer from a laptop.
+	Driver      string
+	Host        string
+	Port        int
+	Username    string
+	Password    string
+	Encryption  string
+	FromName    string
+	FromAddress string
+	// Queue sends through the job queue rather than inline, so a slow mail
+	// server never delays a response.
+	Queue bool
 }
 
 // Session describes how visitor state is stored.
@@ -75,6 +94,17 @@ func Load() *Config {
 		Session: Session{
 			Lifetime: ryconfig.Duration("SESSION_LIFETIME", 14*24*time.Hour),
 		},
+		Mail: Mail{
+			Driver:      ryconfig.String("MAIL_DRIVER", defaultMailDriver(env)),
+			Host:        ryconfig.String("MAIL_HOST", "localhost"),
+			Port:        ryconfig.Int("MAIL_PORT", 1025),
+			Username:    ryconfig.String("MAIL_USERNAME", ""),
+			Password:    ryconfig.String("MAIL_PASSWORD", ""),
+			Encryption:  ryconfig.String("MAIL_ENCRYPTION", "starttls"),
+			FromName:    ryconfig.String("MAIL_FROM_NAME", ryconfig.String("APP_NAME", "{{.Name}}")),
+			FromAddress: ryconfig.String("MAIL_FROM_ADDRESS", "hello@example.com"),
+			Queue:       ryconfig.Bool("MAIL_QUEUE", true),
+		},
 		Log: Log{
 			// auto renders a compact coloured console when attached to a
 			// terminal and JSON otherwise, so local runs are readable and
@@ -85,4 +115,12 @@ func Load() *Config {
 			NoColor: ryconfig.Bool("NO_COLOR", false),
 		},
 	}
+}
+
+// defaultMailDriver keeps development from sending real email by accident.
+func defaultMailDriver(env string) string {
+	if env == ryconfig.EnvProduction {
+		return "smtp"
+	}
+	return "log"
 }

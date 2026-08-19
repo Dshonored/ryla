@@ -16,12 +16,13 @@ func init() {
 // a copy of the model rather than a reference to it, so later changes to
 // models.User cannot silently rewrite what this migration does.
 type user{{.Version}} struct {
-	ID        uint   `gorm:"primaryKey"`
-	Name      string `gorm:"size:80;not null"`
-	Email     string `gorm:"size:255;not null;uniqueIndex"`
-	Password  string `gorm:"size:255;not null"`
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID              uint   `gorm:"primaryKey"`
+	Name            string `gorm:"size:80;not null"`
+	Email           string `gorm:"size:255;not null;uniqueIndex"`
+	Password        string `gorm:"size:255;not null"`
+	EmailVerifiedAt *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func (user{{.Version}}) TableName() string { return "users" }
