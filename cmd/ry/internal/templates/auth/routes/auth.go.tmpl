@@ -1,0 +1,40 @@
+package routes
+
+import (
+	ryauth "{{.RylaModule}}/auth"
+	"{{.RylaModule}}/router"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/controllers"
+	appmw "{{.Module}}/app/middleware"
+)
+
+// RegisterAuth attaches the authentication routes.
+//
+// Call it from Register in web.go. It is a separate function in its own file so
+// that `ry make:auth` never had to rewrite your route table.
+func RegisterAuth(a *app.App) {
+	auth := controllers.NewAuth(a)
+
+	// Loads the signed-in user onto the request context for every route below.
+	a.Router.Use(appmw.CurrentUser(a.DB))
+
+	// Guests only: an authenticated visitor has no business on a login form.
+	a.Router.Group(func(r *router.Router) {
+		r.Use(ryauth.RequireGuest("/"))
+
+		r.Get("/register", auth.ShowRegister).Name("register")
+		r.Post("/register", auth.Register).Name("register.store")
+		r.Get("/login", auth.ShowLogin).Name("login")
+		r.Post("/login", auth.Login).Name("login.store")
+	})
+
+	a.Router.Post("/logout", auth.Logout).Name("logout")
+
+	// Everything behind a sign-in goes here:
+	//
+	//	a.Router.Group(func(r *router.Router) {
+	//	    r.Use(ryauth.RequireAuth("/login"))
+	//	    r.Get("/dashboard", dashboard.Index).Name("dashboard")
+	//	})
+}

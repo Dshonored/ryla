@@ -21,6 +21,7 @@ import (
 	rylog "{{.RylaModule}}/log"
 	"{{.RylaModule}}/middleware"
 	"{{.RylaModule}}/router"
+	"{{.RylaModule}}/session"
 
 	"{{.Module}}/config"
 
@@ -43,6 +44,7 @@ type App struct {
 	Router  *router.Router
 	Cookies *cookie.Jar
 	Flash   *flash.Store
+	Session session.Store
 }
 
 // New builds the application: configuration, logging, database, cookies and the
@@ -86,6 +88,12 @@ func New() (*App, error) {
 	// scheme keeps local development working without weakening production.
 	jar := cookie.New(key, strings.HasPrefix(cfg.URL, "https://"))
 
+	// Sessions are stored in the database rather than the cookie so they can be
+	// revoked: deleting the row ends the session immediately, however many
+	// browsers hold the cookie. "Log out everywhere" and "log out on password
+	// change" both depend on that.
+	sessions := session.NewDBStore(gdb, jar, cfg.Session.Lifetime)
+
 	r := router.New()
 	// Order matters: RequestID first so every later logger has the id; Recover
 	// wraps the handler and still gets logged; CSRF last so it runs closest to
@@ -94,6 +102,7 @@ func New() (*App, error) {
 	r.Use(middleware.WithLogger(logger))
 	r.Use(middleware.Logger(logger))
 	r.Use(middleware.Recover(logger, cfg.Debug))
+	r.Use(session.Middleware(sessions, logger))
 	r.Use(csrf.Protect(csrf.Config{
 		Jar: jar,
 		// Requests authenticated by a bearer token rather than a cookie cannot
@@ -111,6 +120,7 @@ func New() (*App, error) {
 		Router:  r,
 		Cookies: jar,
 		Flash:   flash.New(jar),
+		Session: sessions,
 	}, nil
 }
 

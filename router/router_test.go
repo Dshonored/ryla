@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"testing/fstest"
 )
 
 func noop(http.ResponseWriter, *http.Request) {}
@@ -131,5 +132,97 @@ func TestRoutingStillWorks(t *testing.T) {
 	}
 	if rec.Body.String() != "7" {
 		t.Errorf("body = %q, want %q", rec.Body.String(), "7")
+	}
+}
+
+// TestUseAfterRoutesWorks is the constraint this router exists to remove. chi
+// panics if middleware is added after a route on the same mux, which meant a
+// route file adding middleware partway through would take the whole app down.
+func TestUseAfterRoutesWorks(t *testing.T) {
+	r := New()
+
+	r.Get("/first", noop)
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("X-Late", "1")
+			next.ServeHTTP(w, req)
+		})
+	})
+	r.Get("/second", noop)
+
+	// Middleware declared late still applies to routes declared before it.
+	for _, path := range []string{"/first", "/second"} {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s: status %d", path, rec.Code)
+		}
+		if got := rec.Header().Get("X-Late"); got != "1" {
+			t.Errorf("GET %s: middleware did not apply (X-Late = %q)", path, got)
+		}
+	}
+}
+
+func TestStaticBeforeUseWorks(t *testing.T) {
+	// The exact shape a generated routes file has: assets registered first,
+	// then a group adding middleware.
+	r := New()
+	r.Static("/static", fstest.MapFS{"a.css": &fstest.MapFile{Data: []byte("body{}")}})
+	r.Use(func(next http.Handler) http.Handler { return next })
+	r.Get("/", noop)
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/static/a.css", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("static file status = %d", rec.Code)
+	}
+}
+
+func TestGroupMiddlewareOrderIndependent(t *testing.T) {
+	r := New()
+
+	r.Group(func(r *Router) {
+		r.Get("/guarded", noop)
+		// Declared after the route inside the group.
+		r.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				w.Header().Set("X-Group", "1")
+				next.ServeHTTP(w, req)
+			})
+		})
+	})
+	r.Get("/open", noop)
+
+	for path, want := range map[string]string{"/guarded": "1", "/open": ""} {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if got := rec.Header().Get("X-Group"); got != want {
+			t.Errorf("GET %s: X-Group = %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestMiddlewareRunsInDeclarationOrder(t *testing.T) {
+	r := New()
+	var order []string
+
+	record := func(name string) Middleware {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				order = append(order, name)
+				next.ServeHTTP(w, req)
+			})
+		}
+	}
+
+	r.Use(record("first"))
+	r.Use(record("second"))
+	r.Get("/", noop)
+
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if len(order) != 2 || order[0] != "first" || order[1] != "second" {
+		t.Errorf("middleware ran in order %v, want [first second]", order)
 	}
 }

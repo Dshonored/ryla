@@ -7,7 +7,7 @@ import "embed"
 // silently skips files whose names begin with a dot, which would drop
 // .env and .gitignore from every generated project.
 //
-//go:embed all:base all:db all:web all:make
+//go:embed all:base all:db all:web all:make all:auth
 var FS embed.FS
 
 // Overlay names, kept as constants so a typo is a compile error rather than a
@@ -15,4 +15,5 @@ var FS embed.FS
 const (
 	Base = "base"
 	Make = "make"
+	Auth = "auth"
 )

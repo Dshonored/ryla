@@ -1,0 +1,198 @@
+package controllers
+
+import (
+	"errors"
+	"net/http"
+	"strings"
+
+	"gorm.io/gorm"
+
+	ryauth "{{.RylaModule}}/auth"
+	"{{.RylaModule}}/flash"
+	"{{.RylaModule}}/session"
+	"{{.RylaModule}}/validate"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/models"
+	"{{.Module}}/app/requests"
+	"{{.Module}}/resources/views/auth"
+)
+
+// Auth handles registration, sign-in and sign-out.
+type Auth struct {
+	Base
+}
+
+// NewAuth builds the controller.
+func NewAuth(a *app.App) *Auth {
+	return &Auth{Base{App: a}}
+}
+
+// ShowRegister handles GET /register.
+func (c *Auth) ShowRegister(w http.ResponseWriter, r *http.Request) {
+	c.Render(w, r, auth.Register(auth.RegisterForm{}))
+}
+
+// Register handles POST /register.
+func (c *Auth) Register(w http.ResponseWriter, r *http.Request) {
+	var form requests.Register
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		http.Error(w, "Could not read the submitted form.", http.StatusBadRequest)
+		return
+	}
+
+	form.Email = normalizeEmail(form.Email)
+
+	if !bag.Any() {
+		// Checking first gives a clear message; the unique index below is what
+		// actually guarantees it, since two simultaneous signups can both pass
+		// this check.
+		var count int64
+		if err := c.App.DB.Model(&models.User{}).Where("email = ?", form.Email).Count(&count).Error; err != nil {
+			c.serverError(w, r, "count users", err)
+			return
+		}
+		if count > 0 {
+			bag.Add("email", "That email address is already registered.")
+		}
+	}
+
+	if bag.Any() {
+		c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.Register(auth.RegisterForm{
+			Name: form.Name, Email: form.Email, Errors: bag,
+		}))
+		return
+	}
+
+	hash, err := ryauth.Hash(form.Password)
+	if err != nil {
+		c.serverError(w, r, "hash password", err)
+		return
+	}
+
+	user := models.User{Name: form.Name, Email: form.Email, Password: hash}
+	if err := c.App.DB.Create(&user).Error; err != nil {
+		// The unique index rejecting a duplicate is a race with the check
+		// above, not a server fault.
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			bag.Add("email", "That email address is already registered.")
+			c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.Register(auth.RegisterForm{
+				Name: form.Name, Email: form.Email, Errors: bag,
+			}))
+			return
+		}
+		c.serverError(w, r, "create user", err)
+		return
+	}
+
+	ryauth.LoginID(session.From(r.Context()), user.ID)
+	c.App.Flash.Add(w, r, flash.Success, "Welcome, "+user.Name+".")
+	c.Redirect(w, r, "/")
+}
+
+// ShowLogin handles GET /login.
+func (c *Auth) ShowLogin(w http.ResponseWriter, r *http.Request) {
+	c.Render(w, r, auth.Login(auth.LoginForm{}))
+}
+
+// Login handles POST /login.
+func (c *Auth) Login(w http.ResponseWriter, r *http.Request) {
+	var form requests.Login
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		http.Error(w, "Could not read the submitted form.", http.StatusBadRequest)
+		return
+	}
+	if bag.Any() {
+		c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.Login(auth.LoginForm{
+			Email: form.Email, Errors: bag,
+		}))
+		return
+	}
+
+	form.Email = normalizeEmail(form.Email)
+
+	var user models.User
+	err = c.App.DB.Where("email = ?", form.Email).First(&user).Error
+
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		// Hash anyway. Without this, a missing account answers noticeably
+		// faster than a wrong password, and that difference tells an attacker
+		// which addresses are registered.
+		ryauth.DummyVerify(form.Password)
+		c.failLogin(w, r, form.Email)
+		return
+	case err != nil:
+		c.serverError(w, r, "look up user", err)
+		return
+	}
+
+	ok, err := ryauth.Verify(user.Password, form.Password)
+	if err != nil {
+		c.serverError(w, r, "verify password", err)
+		return
+	}
+	if !ok {
+		c.failLogin(w, r, form.Email)
+		return
+	}
+
+	// The one moment the plaintext password is in hand, so the only moment an
+	// outdated hash can be upgraded without asking the user to do anything.
+	if ryauth.NeedsRehash(user.Password) {
+		if hash, err := ryauth.Hash(form.Password); err == nil {
+			c.App.DB.Model(&user).Update("password", hash)
+		}
+	}
+
+	s := session.From(r.Context())
+	ryauth.LoginID(s, user.ID)
+	c.App.Flash.Add(w, r, flash.Success, "Signed in.")
+
+	// Back to whatever they were trying to reach before being sent here.
+	c.Redirect(w, r, ryauth.Intended(s, "/"))
+}
+
+// Logout handles POST /logout.
+func (c *Auth) Logout(w http.ResponseWriter, r *http.Request) {
+	s := session.From(r.Context())
+
+	// Remove the server-side row as well as clearing the session, so the old
+	// id cannot be replayed by anything still holding the cookie.
+	if store, ok := c.App.Session.(*session.DBStore); ok {
+		_ = store.Destroy(w, r, s)
+	}
+	ryauth.Logout(s)
+
+	c.App.Flash.Add(w, r, flash.Info, "Signed out.")
+	c.Redirect(w, r, "/")
+}
+
+// failLogin reports a bad email or password without saying which.
+//
+// Naming the wrong one turns the login form into a tool for discovering
+// registered addresses.
+func (c *Auth) failLogin(w http.ResponseWriter, r *http.Request, email string) {
+	bag := validate.ErrorBag{}
+	bag.Add("email", "Those credentials do not match our records.")
+
+	c.App.Log.Info("failed sign-in attempt", "email", email)
+	c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.Login(auth.LoginForm{
+		Email: email, Errors: bag,
+	}))
+}
+
+func (c *Auth) serverError(w http.ResponseWriter, r *http.Request, what string, err error) {
+	c.App.Log.Error("could not "+what, "error", err, "path", r.URL.Path)
+	http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+}
+
+// normalizeEmail lowercases and trims, so Alice@Example.com and
+// alice@example.com cannot become two accounts.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}

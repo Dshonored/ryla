@@ -17,8 +17,14 @@ import (
 type Config struct {
 	ryconfig.Core
 
-	DB  Database
-	Log Log
+	DB      Database
+	Log     Log
+	Session Session
+}
+
+// Session describes how visitor state is stored.
+type Session struct {
+	Lifetime time.Duration
 }
 
 // Database describes the SQL connection.
@@ -65,6 +71,9 @@ func Load() *Config {
 			ConnMaxLifetime: ryconfig.Duration("DB_CONN_MAX_LIFETIME", time.Hour),
 			SlowThreshold:   ryconfig.Duration("DB_SLOW_THRESHOLD", 200*time.Millisecond),
 			LogQueries:      ryconfig.Bool("DB_LOG_QUERIES", false),
+		},
+		Session: Session{
+			Lifetime: ryconfig.Duration("SESSION_LIFETIME", 14*24*time.Hour),
 		},
 		Log: Log{
 			// auto renders a compact coloured console when attached to a

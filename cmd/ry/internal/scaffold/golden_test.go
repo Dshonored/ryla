@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Dshonored/ryla/cmd/ry/internal/scaffold"
 	"github.com/Dshonored/ryla/cmd/ry/internal/templates"
@@ -176,4 +177,71 @@ func goLangVersion(t *testing.T) string {
 		return "1.24"
 	}
 	return parts[0] + "." + parts[1]
+}
+
+// TestAuthScaffoldCompiles covers the make:auth output, which is the most
+// intricate thing the generators produce: two view packages, a controller
+// importing both the framework's auth package and a views package of the same
+// name, and a model the framework never sees.
+func TestAuthScaffoldCompiles(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping: scaffolds a project and resolves modules over the network")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("skipping: the Go toolchain is not on PATH")
+	}
+
+	ctx := context.Background()
+	root := repoRoot(t)
+	dir := filepath.Join(t.TempDir(), "demo")
+
+	proj, err := scaffold.NewProject("demo", "demo", "sqlite", "mvc", "dev", goLangVersion(t))
+	if err != nil {
+		t.Fatalf("build project: %v", err)
+	}
+
+	// Two passes, exactly as `ry new` then `ry make:auth` would run them. They
+	// render against different data, which is why they cannot be merged.
+	base := &scaffold.Generator{
+		FS:       templates.FS,
+		Overlays: proj.Overlays(),
+		Dest:     dir,
+		Data:     proj,
+	}
+	if _, err := base.Run(); err != nil {
+		t.Fatalf("generate project: %v", err)
+	}
+
+	auth := &scaffold.Generator{
+		FS:       templates.FS,
+		Overlays: []string{"auth"},
+		Dest:     dir,
+		Data:     scaffold.NewStub("demo", "User"),
+	}
+	if _, err := auth.Run(); err != nil {
+		t.Fatalf("generate auth: %v", err)
+	}
+
+	// The users migration is generated separately, since it carries a timestamp.
+	stub := scaffold.NewStub("demo", "User").WithMigration("create_users", fixedTime())
+	migration := filepath.Join(dir, "database", "migrations", stub.ID+".go")
+	if err := scaffold.RenderTo(templates.FS, "make/migration_users.go.tmpl", migration, stub, false); err != nil {
+		t.Fatalf("render migration: %v", err)
+	}
+
+	run(t, ctx, dir, "go", "mod", "edit",
+		"-replace="+scaffold.RylaModule+"="+root,
+		"-require="+scaffold.RylaModule+"@v0.0.0",
+	)
+	run(t, ctx, dir, "go", "get", "-tool", "github.com/a-h/templ/cmd/templ")
+	run(t, ctx, dir, "go", "tool", "templ", "generate")
+	run(t, ctx, dir, "go", "mod", "tidy")
+	run(t, ctx, dir, "go", "build", "./...")
+	run(t, ctx, dir, "go", "vet", "./...")
+
+	assertGofmtClean(t, ctx, dir)
+}
+
+func fixedTime() time.Time {
+	return time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 }

@@ -87,6 +87,17 @@ header, reading the value from the `csrf-token` meta tag. Without it the
 middleware answers 403. Routes under `/api/` are exempt, since a bearer token
 is not attached by the browser automatically and so cannot be forged.
 
+**Authentication, if `ry make:auth` has been run.** Sessions live in the
+database, so they can be revoked. `auth.Login` regenerates the session id — do
+not skip that, it is what closes session fixation. `middleware.User(ctx)`
+returns the signed-in `*models.User` or nil. Protect routes with
+`ryauth.RequireAuth("/login")` inside a group.
+
+Two rules the login handler follows on purpose: a wrong password and an unknown
+email produce the *same* message, or the form becomes a way to discover
+registered addresses; and the unknown-email path still runs a hash, or it
+answers faster and gives the same thing away through timing.
+
 **APP_KEY signs cookies.** CSRF tokens, flash messages and sessions all depend
 on it. It is generated per project; the app refuses to start in production
 without one. Rotate with `ry key:generate --force`, which logs everyone out.
@@ -119,6 +130,7 @@ ry make:model Post                 # model + create-table migration
 ry make:controller Posts --resource  # the seven CRUD handlers
 ry make:migration add_slug_to_posts
 ry make:middleware EnsureAdmin
+ry make:auth                       # registration, sign-in, sign-out
 ry make:request CreatePost
 ry make:seeder Users
 ```

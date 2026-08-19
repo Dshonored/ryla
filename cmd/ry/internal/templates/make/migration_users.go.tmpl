@@ -1,0 +1,35 @@
+package migrations
+
+import (
+	"time"
+
+	"gorm.io/gorm"
+
+	"{{.RylaModule}}/migrate"
+)
+
+func init() {
+	migrate.Register("{{.ID}}", up{{.Version}}, down{{.Version}})
+}
+
+// user{{.Version}} is the shape of the users table as of this migration. It is
+// a copy of the model rather than a reference to it, so later changes to
+// models.User cannot silently rewrite what this migration does.
+type user{{.Version}} struct {
+	ID        uint   `gorm:"primaryKey"`
+	Name      string `gorm:"size:80;not null"`
+	Email     string `gorm:"size:255;not null;uniqueIndex"`
+	Password  string `gorm:"size:255;not null"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (user{{.Version}}) TableName() string { return "users" }
+
+func up{{.Version}}(tx *gorm.DB) error {
+	return tx.Migrator().CreateTable(&user{{.Version}}{})
+}
+
+func down{{.Version}}(tx *gorm.DB) error {
+	return tx.Migrator().DropTable(&user{{.Version}}{})
+}

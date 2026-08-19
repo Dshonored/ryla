@@ -22,6 +22,7 @@ func makeCmds() []*cobra.Command {
 		makeMiddlewareCmd(),
 		makeSeederCmd(),
 		makeRequestCmd(),
+		makeAuthCmd(),
 	}
 }
 

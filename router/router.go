@@ -2,8 +2,9 @@
 //
 // Handlers stay plain http.HandlerFunc and middleware stays plain
 // func(http.Handler) http.Handler, so anything from the wider Go ecosystem
-// drops in unchanged. The wrapper exists only to provide route groups,
-// prefixes and named routes.
+// drops in unchanged. The wrapper exists to provide route groups, prefixes and
+// named routes — and to remove chi's requirement that middleware be declared
+// before any route on the same mux.
 package router
 
 import (
@@ -11,6 +12,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -18,30 +20,72 @@ import (
 // Middleware is the standard net/http middleware signature.
 type Middleware = func(http.Handler) http.Handler
 
-// Router registers routes and middleware. Sub-routers created by Group and
-// Route share the parent's name registry, so a named route is resolvable from
-// anywhere in the application.
+// Router registers routes and middleware.
+//
+// Registrations are recorded and the underlying mux is built once, on the first
+// request. That is what allows Use to be called after routes have already been
+// declared: chi panics in that case, and the ordering constraint is an
+// implementation detail no application should have to know about. It also means
+// a route added after the server starts serving is ignored — declare
+// everything during start-up.
 type Router struct {
-	mux    chi.Router
+	mu     sync.Mutex
 	names  *registry
 	prefix string
+
+	middleware []Middleware
+	ops        []func(chi.Router)
+
+	once  sync.Once
+	built chi.Router
 }
 
 // New creates an empty Router.
 func New() *Router {
-	return &Router{mux: chi.NewRouter(), names: newRegistry()}
+	return &Router{names: newRegistry()}
 }
 
-// ServeHTTP makes Router an http.Handler.
+// ServeHTTP makes Router an http.Handler, building the mux on first use.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	r.mux.ServeHTTP(w, req)
+	r.once.Do(func() {
+		mux := chi.NewRouter()
+		r.applyTo(mux)
+		r.built = mux
+	})
+	r.built.ServeHTTP(w, req)
 }
 
-// Use appends middleware to this router. It must be called before any route is
-// registered on the same router; chi panics otherwise. To apply middleware to a
-// subset of routes, use Group.
+// applyTo replays this router's middleware and routes onto a chi mux, in the
+// order chi requires regardless of the order they were declared in.
+func (r *Router) applyTo(mux chi.Router) {
+	r.mu.Lock()
+	middleware := make([]Middleware, len(r.middleware))
+	copy(middleware, r.middleware)
+
+	ops := make([]func(chi.Router), len(r.ops))
+	copy(ops, r.ops)
+	r.mu.Unlock()
+
+	for _, mw := range middleware {
+		mux.Use(mw)
+	}
+	for _, op := range ops {
+		op(mux)
+	}
+}
+
+func (r *Router) record(op func(chi.Router)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ops = append(r.ops, op)
+}
+
+// Use appends middleware. Unlike chi, it may be called at any point — before or
+// after the routes it applies to.
 func (r *Router) Use(mw ...Middleware) {
-	r.mux.Use(mw...)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.middleware = append(r.middleware, mw...)
 }
 
 // Group runs fn against an isolated router that inherits the current prefix and
@@ -49,12 +93,15 @@ func (r *Router) Use(mw ...Middleware) {
 // there.
 //
 //	r.Group(func(r *router.Router) {
-//	    r.Use(middleware.Auth)
+//	    r.Use(auth.RequireAuth("/login"))
 //	    r.Get("/dashboard", h)
 //	})
 func (r *Router) Group(fn func(*Router)) {
-	r.mux.Group(func(c chi.Router) {
-		fn(&Router{mux: c, names: r.names, prefix: r.prefix})
+	sub := &Router{names: r.names, prefix: r.prefix}
+	fn(sub)
+
+	r.record(func(c chi.Router) {
+		c.Group(func(inner chi.Router) { sub.applyTo(inner) })
 	})
 }
 
@@ -64,20 +111,23 @@ func (r *Router) Group(fn func(*Router)) {
 //	    r.Get("/users", h)   // -> /admin/users
 //	})
 func (r *Router) Route(prefix string, fn func(*Router)) {
-	r.mux.Route(prefix, func(c chi.Router) {
-		fn(&Router{mux: c, names: r.names, prefix: joinPath(r.prefix, prefix)})
+	sub := &Router{names: r.names, prefix: joinPath(r.prefix, prefix)}
+	fn(sub)
+
+	r.record(func(c chi.Router) {
+		c.Route(prefix, func(inner chi.Router) { sub.applyTo(inner) })
 	})
 }
 
 // Mount attaches an arbitrary http.Handler at prefix. Routes behind a Mount
 // cannot be named, since the router cannot see them.
 func (r *Router) Mount(prefix string, h http.Handler) {
-	r.mux.Mount(prefix, h)
+	r.record(func(c chi.Router) { c.Mount(prefix, h) })
 }
 
 // Method registers a handler for an arbitrary HTTP method.
 func (r *Router) Method(method, pattern string, h http.HandlerFunc) *Route {
-	r.mux.Method(method, pattern, h)
+	r.record(func(c chi.Router) { c.Method(method, pattern, h) })
 	return &Route{
 		Method:  method,
 		Pattern: joinPath(r.prefix, pattern),
@@ -126,15 +176,21 @@ func (r *Router) Static(prefix string, fsys fs.FS) {
 	if !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
-	r.mux.Handle(prefix+"*", http.StripPrefix(prefix, http.FileServerFS(fsys)))
+	r.record(func(c chi.Router) {
+		c.Handle(prefix+"*", http.StripPrefix(prefix, http.FileServerFS(fsys)))
+	})
 }
 
 // NotFound sets the handler used when no route matches.
-func (r *Router) NotFound(h http.HandlerFunc) { r.mux.NotFound(h) }
+func (r *Router) NotFound(h http.HandlerFunc) {
+	r.record(func(c chi.Router) { c.NotFound(h) })
+}
 
 // MethodNotAllowed sets the handler used when a path matches but the method
 // does not.
-func (r *Router) MethodNotAllowed(h http.HandlerFunc) { r.mux.MethodNotAllowed(h) }
+func (r *Router) MethodNotAllowed(h http.HandlerFunc) {
+	r.record(func(c chi.Router) { c.MethodNotAllowed(h) })
+}
 
 // URL builds the path for a named route. Params are key/value pairs matching
 // the placeholders in the route pattern:
