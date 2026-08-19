@@ -1,26 +1,44 @@
 package views
 
+import (
+	"strconv"
+
+	"github.com/Dshonored/ryla/csrf"
+	"github.com/Dshonored/ryla/flash"
+	"github.com/Dshonored/ryla/validate"
+)
+
 // Env is what the welcome page reports about the running application. Delete
-// this along with the rest of the demo once you have your own home page.
+// this along with the rest of the demo.
 type Env struct {
-	AppName   string
-	RylaVer   string
-	GoVer     string
-	Env       string
-	Database  string
-	Routes    int
-	StartedAt string
+	AppName  string
+	RylaVer  string
+	GoVer    string
+	Env      string
+	Database string
+	Routes   int
+	Flashes  []flash.Message
 }
 
-templ Home(env Env) {
+// SubscribeForm carries the demo form back to the page after a failed submit,
+// so the user does not lose what they typed.
+type SubscribeForm struct {
+	Name   string
+	Email  string
+	Errors validate.ErrorBag
+}
+
+templ Home(env Env, form SubscribeForm) {
 	@Layout(env.AppName) {
 		<div class="stack">
+			@Flashes(env.Flashes)
+
 			<header class="stack-sm">
 				<span class="badge">Ryla { env.RylaVer }</span>
 				<h1>{ env.AppName } is running</h1>
 				<p class="muted">
 					Everything below is a demo page. Replace it with your own — the
-					last card says which files to touch.
+					"What to edit" card says which files to touch.
 				</p>
 			</header>
 
@@ -41,8 +59,10 @@ templ Home(env Env) {
 					<button id="counter-reset" class="btn btn-quiet" type="button">Reset</button>
 				</div>
 
-				<p id="counter-error" class="small" style="color: var(--danger); display: none;"></p>
+				<p id="counter-error" class="small field-error" style="display: none;"></p>
 			</section>
+
+			@Subscribe(form)
 
 			<section class="stack">
 				<h2>Environment</h2>
@@ -61,7 +81,7 @@ templ Home(env Env) {
 					</dl>
 					<dl class="stat">
 						<dt>Named routes</dt>
-						<dd>{ env.Routes }</dd>
+						<dd>{ strconv.Itoa(env.Routes) }</dd>
 					</dl>
 				</div>
 			</section>
@@ -87,6 +107,10 @@ templ Home(env Env) {
 					<li>
 						<code>app/controllers/home.go</code>
 						<span>The handler behind this page.</span>
+					</li>
+					<li>
+						<code>app/requests/</code>
+						<span>What a form may contain, and what counts as valid.</span>
 					</li>
 					<li>
 						<code>resources/static/app.css</code>
@@ -115,24 +139,96 @@ templ Home(env Env) {
 						<span>The seven CRUD handlers, and the route lines to paste.</span>
 					</li>
 					<li>
-						<code>ry migrate</code>
-						<span>Apply pending migrations.</span>
+						<code>ry make:request CreatePost</code>
+						<span>A validated request type.</span>
 					</li>
 					<li>
-						<code>ry routes</code>
-						<span>List every named route.</span>
+						<code>ry migrate</code>
+						<span>Apply pending migrations.</span>
 					</li>
 				</ul>
 			</section>
 
 			<p class="footer">
 				Remove the demo when you are ready: delete
-				<code>app/controllers/demo.go</code>, its route in
-				<code>routes/web.go</code>, <code>resources/static/demo.js</code>, and
-				rewrite <code>home.templ</code>.
+				<code>app/controllers/demo.go</code>, <code>app/requests/subscribe.go</code>,
+				the <code>/demo</code> routes in <code>routes/web.go</code>,
+				<code>resources/static/demo.js</code>, and rewrite <code>home.templ</code>.
 			</p>
 		</div>
 
 		<script src="/static/demo.js" defer></script>
 	}
+}
+
+// Flashes renders any pending messages.
+templ Flashes(messages []flash.Message) {
+	if len(messages) > 0 {
+		<div class="stack-sm">
+			for _, m := range messages {
+				<p class={ "flash", "flash-" + string(m.Kind) } role="status">{ m.Text }</p>
+			}
+		</div>
+	}
+}
+
+// Subscribe is the demo form: binding, validation, CSRF and flash in one place.
+templ Subscribe(form SubscribeForm) {
+	<section class="card stack">
+		<div class="stack-sm">
+			<h2>It validates a form</h2>
+			<p class="muted small">
+				Submit it empty, or with a broken email, to see the errors. The rules
+				live in <code>app/requests/subscribe.go</code>; the handler is
+				<code>Subscribe</code> in <code>app/controllers/demo.go</code>.
+			</p>
+		</div>
+
+		<form method="post" action="/demo/subscribe" class="stack-sm" novalidate>
+			// The CSRF token. Every state-changing form needs one, or the
+			// middleware rejects the request with a 403.
+			@templ.Raw(csrf.Field(ctx))
+
+			<div class="field">
+				<label for="name">Name</label>
+				<input
+					id="name"
+					name="name"
+					type="text"
+					value={ form.Name }
+					aria-invalid={ ariaInvalid(form.Errors, "name") }
+				/>
+				if form.Errors.Has("name") {
+					<p class="field-error">{ form.Errors.First("name") }</p>
+				}
+			</div>
+
+			<div class="field">
+				<label for="email">Email</label>
+				<input
+					id="email"
+					name="email"
+					type="email"
+					value={ form.Email }
+					aria-invalid={ ariaInvalid(form.Errors, "email") }
+				/>
+				if form.Errors.Has("email") {
+					<p class="field-error">{ form.Errors.First("email") }</p>
+				}
+			</div>
+
+			<div>
+				<button class="btn" type="submit">Subscribe</button>
+			</div>
+		</form>
+	</section>
+}
+
+// ariaInvalid marks a field for screen readers, so an error is not something
+// only sighted users find out about.
+func ariaInvalid(bag validate.ErrorBag, field string) string {
+	if bag.Has(field) {
+		return "true"
+	}
+	return "false"
 }

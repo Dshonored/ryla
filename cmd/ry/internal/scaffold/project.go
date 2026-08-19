@@ -1,6 +1,8 @@
 package scaffold
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"path"
 	"sort"
@@ -145,6 +147,19 @@ type Project struct {
 	DefaultDSN     string
 	DBMaxOpenConns int
 	UsesTempl      bool
+
+	// AppKey signs cookies. It is generated per project so a new application is
+	// never born with a shared or empty signing key.
+	AppKey string
+}
+
+// NewAppKey returns a fresh random application key.
+func NewAppKey() (string, error) {
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("scaffold: generate application key: %w", err)
+	}
+	return "base64:" + base64.StdEncoding.EncodeToString(b[:]), nil
 }
 
 // NewProject validates the inputs and fills in everything derived from them.
@@ -170,6 +185,11 @@ func NewProject(name, module, dbName, webName, rylaVersion, goVersion string) (*
 		return nil, err
 	}
 
+	key, err := NewAppKey()
+	if err != nil {
+		return nil, err
+	}
+
 	return &Project{
 		Name:           name,
 		Module:         module,
@@ -182,6 +202,7 @@ func NewProject(name, module, dbName, webName, rylaVersion, goVersion string) (*
 		DefaultDSN:     fmt.Sprintf(db.DefaultDSN, naming.Kebab(name)),
 		DBMaxOpenConns: db.MaxOpenConns,
 		UsesTempl:      web.UsesTempl,
+		AppKey:         key,
 	}, nil
 }
 

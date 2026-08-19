@@ -22,6 +22,8 @@ The app listens on http://localhost:8080.
 | `ry migrate:rollback` | Undo the last batch of migrations |
 | `ry migrate:status` | Show which migrations have run |
 | `ry make:controller Posts` | Generate a controller |
+| `ry make:request CreatePost` | Generate a validated request type |
+| `ry key:generate` | Generate the key that signs cookies |
 | `ry make:model Post` | Generate a model and its migration |
 | `ry routes` | List named routes |
 
@@ -40,6 +42,7 @@ application restyles.
 
 ```
 app/            controllers, models, middleware — your code
+app/requests/   what a form may contain, and what counts as valid
 config/         typed configuration, read from the environment
 database/       migrations and seeders
 resources/      templ views and static assets

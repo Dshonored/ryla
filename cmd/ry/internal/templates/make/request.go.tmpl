@@ -1,0 +1,10 @@
+package requests
+
+// {{.Pascal}} is bound from the request body and validated before use.
+//
+// Field names come from the `form` tag, so an ErrorBag key matches the name
+// attribute of the input that produced it.
+type {{.Pascal}} struct {
+	Name  string `form:"name" validate:"required,min=2,max=80"`
+	Email string `form:"email" validate:"required,email"`
+}

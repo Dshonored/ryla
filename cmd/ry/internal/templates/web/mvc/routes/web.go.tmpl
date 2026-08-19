@@ -28,6 +28,7 @@ func Register(a *app.App) {
 	a.Router.Get("/demo/counter", demo.Counter).Name("demo.counter")
 	a.Router.Post("/demo/counter", demo.Counter).Name("demo.counter.increment")
 	a.Router.Post("/demo/counter/reset", demo.Reset).Name("demo.counter.reset")
+	a.Router.Post("/demo/subscribe", demo.Subscribe).Name("demo.subscribe")
 }
 
 // health is the liveness endpoint. Deployment tooling wants a route that

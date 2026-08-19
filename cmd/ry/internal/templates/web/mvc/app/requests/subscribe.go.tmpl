@@ -1,0 +1,11 @@
+package requests
+
+// Subscribe is the welcome page's demo form. Delete it with the rest of the
+// demo.
+//
+// The `form` tags name the fields, and the same names key the ErrorBag, so a
+// template looks up an error with the same string it uses for the input.
+type Subscribe struct {
+	Name  string `form:"name" validate:"required,min=2,max=80"`
+	Email string `form:"email" validate:"required,email"`
+}

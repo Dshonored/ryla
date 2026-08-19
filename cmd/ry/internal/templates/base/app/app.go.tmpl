@@ -6,12 +6,18 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"strings"
 
 	"gorm.io/gorm"
 
+	"{{.RylaModule}}/cookie"
+	"{{.RylaModule}}/csrf"
 	rydb "{{.RylaModule}}/db"
+	"{{.RylaModule}}/flash"
 	rylog "{{.RylaModule}}/log"
 	"{{.RylaModule}}/middleware"
 	"{{.RylaModule}}/router"
@@ -24,17 +30,24 @@ import (
 	_ "{{.Module}}/database/migrations"
 )
 
+// devKey stands in for APP_KEY when it is missing outside production. It is a
+// fixed, published value: signatures made with it are worthless, which is the
+// point — it keeps a fresh checkout running without ever looking like security.
+const devKey = "ryla-insecure-development-key"
+
 // App holds everything the application needs at runtime.
 type App struct {
-	Config *config.Config
-	Log    *slog.Logger
-	DB     *gorm.DB
-	Router *router.Router
+	Config  *config.Config
+	Log     *slog.Logger
+	DB      *gorm.DB
+	Router  *router.Router
+	Cookies *cookie.Jar
+	Flash   *flash.Store
 }
 
-// New builds the application: configuration, logging, database and the router
-// with its global middleware stack. Routes are registered separately, by main,
-// so that the routes package can import this one.
+// New builds the application: configuration, logging, database, cookies and the
+// router with its global middleware stack. Routes are registered separately, by
+// main, so that the routes package can import this one.
 func New() (*App, error) {
 	if err := config.LoadEnv(); err != nil {
 		return nil, fmt.Errorf("load environment: %w", err)
@@ -51,6 +64,11 @@ func New() (*App, error) {
 	// slog.Default lands in the same output stream.
 	slog.SetDefault(logger)
 
+	key, err := signingKey(cfg, logger)
+	if err != nil {
+		return nil, err
+	}
+
 	gdb, err := rydb.Open(rydb.Config{
 		Driver:          cfg.DB.Driver,
 		DSN:             cfg.DB.DSN,
@@ -64,20 +82,56 @@ func New() (*App, error) {
 		return nil, err
 	}
 
+	// Secure cookies are never sent over plain HTTP, so tying this to the URL
+	// scheme keeps local development working without weakening production.
+	jar := cookie.New(key, strings.HasPrefix(cfg.URL, "https://"))
+
 	r := router.New()
-	// Order matters: RequestID first so every later logger has the id;
-	// Recover last so it wraps the handler and still gets logged.
+	// Order matters: RequestID first so every later logger has the id; Recover
+	// wraps the handler and still gets logged; CSRF last so it runs closest to
+	// the handler and its rejections are logged like any other response.
 	r.Use(middleware.RequestID)
 	r.Use(middleware.WithLogger(logger))
 	r.Use(middleware.Logger(logger))
 	r.Use(middleware.Recover(logger, cfg.Debug))
+	r.Use(csrf.Protect(csrf.Config{
+		Jar: jar,
+		// Requests authenticated by a bearer token rather than a cookie cannot
+		// be forged by a third-party page, because the browser does not attach
+		// the credential automatically.
+		Skip: func(req *http.Request) bool {
+			return strings.HasPrefix(req.URL.Path, "/api/")
+		},
+	}))
 
 	return &App{
-		Config: cfg,
-		Log:    logger,
-		DB:     gdb,
-		Router: r,
+		Config:  cfg,
+		Log:     logger,
+		DB:      gdb,
+		Router:  r,
+		Cookies: jar,
+		Flash:   flash.New(jar),
 	}, nil
+}
+
+// signingKey resolves APP_KEY, refusing to start without one in production.
+//
+// An empty key means every signature validates against an empty secret, so CSRF
+// tokens and flash messages could be forged by anyone. That is survivable while
+// developing and never survivable in production.
+func signingKey(cfg *config.Config, logger *slog.Logger) (string, error) {
+	if cfg.Key != "" {
+		return cfg.Key, nil
+	}
+	if cfg.IsProduction() {
+		return "", errors.New(
+			"APP_KEY is empty. Cookies could be forged by anyone, so the application " +
+				"will not start in production. Generate one with: ry key:generate")
+	}
+
+	logger.Warn("APP_KEY is empty; falling back to a published development key",
+		"fix", "ry key:generate")
+	return devKey, nil
 }
 
 // Close releases resources held by the application.

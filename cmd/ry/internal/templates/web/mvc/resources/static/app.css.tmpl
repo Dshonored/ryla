@@ -337,3 +337,54 @@ code {
 	:root { --text-3xl: 2rem; }
 	.container { padding: var(--space-6) var(--space-4); }
 }
+
+/* --- Forms and flash messages -------------------------------------------- */
+
+.field label {
+	display: block;
+	margin-bottom: var(--space-1);
+	font-size: var(--text-sm);
+	font-weight: 600;
+}
+
+.field input {
+	width: 100%;
+	padding: var(--space-3);
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius);
+	background: var(--surface);
+	color: var(--text);
+	font: inherit;
+}
+
+.field input:focus-visible {
+	border-color: var(--accent);
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+/* Driven by aria-invalid rather than a class, so the visual state and the
+   state announced to a screen reader can never disagree. */
+.field input[aria-invalid="true"] {
+	border-color: var(--danger);
+}
+
+.field-error {
+	margin-top: var(--space-1);
+	color: var(--danger);
+	font-size: var(--text-sm);
+}
+
+.flash {
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--border);
+	border-left-width: 3px;
+	border-radius: var(--radius);
+	background: var(--surface);
+	font-size: var(--text-sm);
+}
+
+.flash-success { border-left-color: var(--success); }
+.flash-info    { border-left-color: var(--accent); }
+.flash-warning { border-left-color: var(--warning); }
+.flash-error   { border-left-color: var(--danger); }

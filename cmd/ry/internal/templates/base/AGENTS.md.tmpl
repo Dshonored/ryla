@@ -63,6 +63,29 @@ calling `os.Getenv` from the code that uses them.
 **Real environment variables beat `.env`.** `.env` fills in what the environment
 has not already set, never the reverse.
 
+**Forms follow one shape.** Declare what a request may contain in
+`app/requests`, then bind and validate in one step:
+
+    var form requests.CreatePost
+    bag, err := validate.BindAndCheck(r, &form)
+    if err != nil { /* malformed input: 400 */ }
+    if bag.Any() { /* re-render with bag and the submitted values */ }
+
+The two failures are different on purpose: a body that is not valid JSON is not
+the same problem as an email address with a typo. On success, flash a message
+and redirect — redirecting after a POST is what stops a refresh submitting
+twice.
+
+**Every state-changing form needs a CSRF token.** Server-rendered forms embed
+`@templ.Raw(csrf.Field(ctx))`; fetch/XHR requests send the `X-CSRF-Token`
+header, reading the value from the `csrf-token` meta tag. Without it the
+middleware answers 403. Routes under `/api/` are exempt, since a bearer token
+is not attached by the browser automatically and so cannot be forged.
+
+**APP_KEY signs cookies.** CSRF tokens, flash messages and sessions all depend
+on it. It is generated per project; the app refuses to start in production
+without one. Rotate with `ry key:generate --force`, which logs everyone out.
+
 **Views are compiled.** `.templ` files become Go, so a typo or a wrong argument
 is a build error rather than a blank page. Render through the controller's
 `Render` helper, which buffers output so a failed render becomes a clean 500
@@ -74,6 +97,7 @@ instead of half a page.
 app/controllers/   HTTP handlers; embed Base for Render/JSON/Redirect
 app/models/        GORM models
 app/middleware/    application middleware (framework middleware is in app.New)
+app/requests/      what a form may contain, and what counts as valid
 config/            typed settings
 database/migrations/  self-registering, timestamped
 database/seeders/  ordered, called from Run
@@ -90,6 +114,7 @@ ry make:model Post                 # model + create-table migration
 ry make:controller Posts --resource  # the seven CRUD handlers
 ry make:migration add_slug_to_posts
 ry make:middleware EnsureAdmin
+ry make:request CreatePost
 ry make:seeder Users
 ```
 

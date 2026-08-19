@@ -39,6 +39,14 @@
 		error.style.display = "none";
 	}
 
+	// Every state-changing request needs the CSRF token, or the middleware
+	// rejects it with a 403. It is published in a meta tag because the cookie
+	// holds a signed form a script cannot unwrap.
+	function csrfToken() {
+		const meta = document.querySelector('meta[name="csrf-token"]');
+		return meta ? meta.getAttribute("content") : "";
+	}
+
 	async function call(path) {
 		increment.disabled = true;
 		reset.disabled = true;
@@ -47,7 +55,10 @@
 		try {
 			const response = await fetch(path, {
 				method: "POST",
-				headers: { Accept: "application/json" },
+				headers: {
+					Accept: "application/json",
+					"X-CSRF-Token": csrfToken(),
+				},
 			});
 			if (!response.ok) {
 				throw new Error("server responded " + response.status);

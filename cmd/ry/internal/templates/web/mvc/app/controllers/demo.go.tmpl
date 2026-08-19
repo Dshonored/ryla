@@ -4,14 +4,19 @@ import (
 	"net/http"
 	"sync/atomic"
 
+	"{{.RylaModule}}/flash"
+	"{{.RylaModule}}/validate"
+
 	"{{.Module}}/app"
+	"{{.Module}}/app/requests"
+	"{{.Module}}/resources/views"
 )
 
-// Demo backs the counter on the welcome page. It exists to prove the whole
-// round trip works — route, controller, JSON response — and to be deleted.
+// Demo backs the welcome page: a counter proving the round trip works, and a
+// form showing binding, validation, CSRF and flash messages together.
 //
-// Delete this file, the /demo routes in routes/web.go, and
-// resources/static/demo.js once you have your own home page.
+// It exists to be deleted. Remove this file, the /demo routes in
+// routes/web.go, resources/static/demo.js, and requests/subscribe.go.
 type Demo struct {
 	Base
 
@@ -40,4 +45,37 @@ func (c *Demo) Counter(w http.ResponseWriter, r *http.Request) {
 func (c *Demo) Reset(w http.ResponseWriter, r *http.Request) {
 	c.count.Store(0)
 	c.JSON(w, r, http.StatusOK, map[string]int64{"count": 0})
+}
+
+// Subscribe handles POST /demo/subscribe.
+//
+// This is the shape almost every form handler takes: bind and validate, render
+// the page again with the errors and the submitted values when it fails, or
+// flash a message and redirect when it succeeds. Redirecting after a successful
+// POST is what stops a browser refresh from submitting twice.
+func (c *Demo) Subscribe(w http.ResponseWriter, r *http.Request) {
+	var form requests.Subscribe
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		// Malformed input rather than a value to correct: nothing the user can
+		// usefully act on, so it is a 400 rather than a form error.
+		c.App.Log.Warn("could not read the subscribe form", "error", err)
+		http.Error(w, "Could not read the submitted form.", http.StatusBadRequest)
+		return
+	}
+
+	if bag.Any() {
+		// Re-render with the errors and whatever was typed, so the user does
+		// not lose their work.
+		c.RenderStatus(w, r, http.StatusUnprocessableEntity, views.Home(pageEnv(c.App, w, r), views.SubscribeForm{
+			Name:   form.Name,
+			Email:  form.Email,
+			Errors: bag,
+		}))
+		return
+	}
+
+	c.App.Flash.Add(w, r, flash.Success, "Thanks, "+form.Name+" — that form validated cleanly.")
+	c.Redirect(w, r, "/")
 }

@@ -21,7 +21,50 @@ func makeCmds() []*cobra.Command {
 		makeMigrationCmd(),
 		makeMiddlewareCmd(),
 		makeSeederCmd(),
+		makeRequestCmd(),
 	}
+}
+
+func makeRequestCmd() *cobra.Command {
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:     "make:request <name>",
+		Short:   "Generate a validated request type",
+		Example: "  ry make:request CreatePost",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, stub, err := makeContext(args[0])
+			if err != nil {
+				return err
+			}
+
+			dest := p.Path("app", "requests", naming.Snake(args[0])+".go")
+			if err := scaffold.RenderTo(templates.FS, "make/request.go.tmpl", dest, stub, force); err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			reportCreated(out, p, dest)
+			fmt.Fprintf(out, `
+Bind and validate it in a handler:
+
+	var form requests.%s
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		http.Error(w, "Could not read the submitted form.", http.StatusBadRequest)
+		return
+	}
+	if bag.Any() {
+		// re-render with bag and the submitted values
+	}
+`, stub.Pascal)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite an existing file")
+	return cmd
 }
 
 func makeControllerCmd() *cobra.Command {

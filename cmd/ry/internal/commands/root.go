@@ -112,6 +112,7 @@ CLI that generates the boilerplate so you do not have to write it.
 		buildCmd(),
 		startCmd(),
 		updateCmd(),
+		keyGenerateCmd(),
 		versionCmd(),
 	)
 	cmd.AddCommand(makeCmds()...)
