@@ -45,3 +45,35 @@ jobs:
       # broken one.
       - name: Test
         run: go test ./...
+
+  # MongoDB integration tests, on their own job because service containers only
+  # exist on the Linux runners. Without this the live tests would skip
+  # everywhere and quietly test nothing.
+  mongo:
+    runs-on: ubuntu-latest
+
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: Test against MongoDB
+        env:
+          MONGO_TEST_URI: mongodb://localhost:27017
+        # -run Live so a skip caused by a missing URI cannot hide here: these
+        # are the tests this job exists for, and -v shows whether they ran.
+        run: go test ./mongo/ -run Live -v
