@@ -75,6 +75,11 @@ jobs:
         working-directory: site
         run: go test ./...
 
+      # buildx defaults to the "docker" driver, which cannot export a build
+      # cache at all. The container driver can, and still supports --load, so
+      # the image below is still available to run afterwards.
+      - uses: docker/setup-buildx-action@v3
+
       # Build the image the host will build, so a Dockerfile mistake fails here
       # rather than halfway through a deploy.
       - name: Build the image
