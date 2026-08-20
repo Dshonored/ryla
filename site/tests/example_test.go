@@ -20,6 +20,7 @@ import (
 	rytest "github.com/Dshonored/ryla/testing"
 
 	"ryla-site/app"
+	"ryla-site/resources/views"
 	"ryla-site/routes"
 )
 
@@ -186,6 +187,17 @@ func TestThePageDeclaresItselfToSearchAndSocial(t *testing.T) {
 			`application/ld+json`,
 			`"@type":"SoftwareSourceCode"`,
 		)
+}
+
+// TestTheSearchConsoleTagSurvives guards the one tag whose absence is silent.
+//
+// Google re-checks ownership periodically, so a refactor that drops this from
+// the head does not break the page or fail a build — it quietly unverifies the
+// property weeks later, and the first symptom is search data going missing.
+func TestTheSearchConsoleTagSurvives(t *testing.T) {
+	client(t).Get("/").
+		AssertOK().
+		AssertContains(`<meta name="google-site-verification" content="` + views.SearchConsoleToken + `">`)
 }
 
 // TestTheHealthEndpointReportsOK covers the route a load balancer polls. It is

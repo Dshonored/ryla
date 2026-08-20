@@ -13,6 +13,17 @@ const Description = "A batteries-included web framework for Go. Routing, ORM, mi
 	"auth, queues, mail, cache and a scheduler already wired together, and a CLI that writes " +
 	"the boilerplate as real Go files you can read and delete."
 
+// SearchConsoleToken proves to Google that whoever controls this repository
+// controls the site.
+//
+// It is a verification token, not a credential: it grants nothing, and it is
+// visible in the page source of every site that uses this method. Keeping it in
+// the repository rather than in a file dropped on a server is what makes the
+// verification survive a redeploy — the site is rebuilt from this tree, so
+// anything not committed here would silently disappear on the next push and
+// Google would eventually unverify the property.
+const SearchConsoleToken = "sS3cDsfvnwRiovSNdhR2Ne3A5yOHfL8_i5TDj5dHpYI"
+
 // structuredData returns the JSON-LD block for the landing page.
 //
 // SoftwareSourceCode is the accurate type for a library. SoftwareApplication

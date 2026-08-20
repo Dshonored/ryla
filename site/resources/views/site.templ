@@ -52,6 +52,7 @@ templ SiteLayout(title string, s Site) {
 			<meta name="color-scheme" content="dark light"/>
 			<title>{ title }</title>
 			<meta name="description" content={ Description }/>
+			<meta name="google-site-verification" content={ SearchConsoleToken }/>
 			<link rel="canonical" href={ Origin + "/" }/>
 			// Open Graph and Twitter cards. A framework gets shared as a link in
 			// chat far more often than it gets found in a search result, so the
