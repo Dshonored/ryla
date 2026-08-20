@@ -1,0 +1,99 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --gray-1:#0a0a0a; --gray-3:#171717; --gray-6:#333333; --gray-8:#525252;
+    --gray-9:#737373; --gray-10:#a3a3a3; --gray-12:#ededed;
+    --blue:#0072f5; --blue-fg:#52a8ff; --blue-subtle:#0a1a2f; --green:#45d97a;
+    --sans:"Geist", ui-sans-serif, system-ui, sans-serif;
+    --mono:"Geist Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1200px; height: 630px; }
+  body {
+    background: var(--gray-1);
+    /* The same wash the hero uses, so the card and the page it links to are
+       recognisably the same surface. */
+    background-image: radial-gradient(ellipse 900px 460px at 50% -12%, var(--gray-3) 0%, var(--gray-1) 68%);
+    color: var(--gray-12);
+    font-family: var(--sans);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 64px 72px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .top { display: flex; align-items: center; justify-content: space-between; }
+  .brand { display: flex; align-items: center; gap: 16px; }
+  .brand span { font-size: 34px; font-weight: 600; letter-spacing: -0.03em; }
+
+  .chip {
+    display: inline-flex; align-items: center; height: 34px; padding: 0 14px;
+    border: 1px solid rgba(0,114,245,0.4); border-radius: 2px;
+    background: var(--blue-subtle); color: var(--blue-fg);
+    font-family: var(--mono); font-size: 16px; letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  h1 {
+    font-size: 82px; line-height: 1.02; letter-spacing: -0.035em;
+    font-weight: 600; text-wrap: balance;
+  }
+  .sub {
+    margin-top: 26px; font-size: 27px; line-height: 1.45; color: var(--gray-10);
+    max-width: 900px; text-wrap: pretty;
+  }
+
+  .bottom { display: flex; align-items: center; justify-content: space-between; gap: 32px; }
+
+  /* The call to action, drawn exactly as the page draws it. */
+  .install {
+    display: inline-flex; align-items: center; gap: 12px;
+    height: 62px; padding: 0 22px;
+    border: 1px solid #3d3d3d; border-radius: 2px; background: #111111;
+    font-family: var(--mono); font-size: 23px; white-space: nowrap;
+  }
+  .install .p { color: var(--gray-8); }
+  .install .host { color: var(--gray-10); }
+
+  .facts { display: flex; gap: 28px; font-family: var(--mono); font-size: 17px; color: var(--gray-9); }
+  .facts b { color: var(--gray-12); font-weight: 500; }
+  .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--green); display: inline-block; margin-right: 9px; vertical-align: 1px; }
+</style>
+
+<div class="top">
+  <div class="brand">
+    <svg width="46" height="46" viewBox="0 0 100 100" fill="none">
+      <linearGradient id="r" x1="44" y1="54" x2="74" y2="82" gradientUnits="userSpaceOnUse">
+        <stop offset="0" stop-color="#ededed"></stop><stop offset="0.65" stop-color="#0072f5"></stop>
+      </linearGradient>
+      <path d="M28 18V82" stroke="#ededed" stroke-width="14"></path>
+      <path d="M28 18H58L72 32V40L58 54H28" stroke="#ededed" stroke-width="14"></path>
+      <path d="M44 54L74 82" stroke="url(#r)" stroke-width="14"></path>
+    </svg>
+    <span>Ryla</span>
+  </div>
+  <div class="chip">A web framework for Go</div>
+</div>
+
+<div>
+  <h1>Laravel's productivity.<br>Go's deploy story.</h1>
+  <p class="sub">
+    Routing, ORM, migrations, auth, queues, mail, cache and a scheduler, already
+    wired together — and a CLI that writes the boilerplate as real Go files.
+  </p>
+</div>
+
+<div class="bottom">
+  <div class="install">
+    <span class="p">$</span>
+    <span>curl -fsSL <span class="host">ryla.io/</span>install.sh | sh</span>
+  </div>
+  <div class="facts">
+    <span><span class="dot"></span>MIT</span>
+    <span><b>1</b> binary</span>
+    <span><b>0</b> runtime deps</span>
+  </div>
+</div>

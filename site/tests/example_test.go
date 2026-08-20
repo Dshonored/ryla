@@ -184,6 +184,7 @@ func TestThePageDeclaresItselfToSearchAndSocial(t *testing.T) {
 			`<link rel="canonical" href="https://ryla.io/">`,
 			`<meta property="og:url" content="https://ryla.io/">`,
 			`<meta name="twitter:card"`,
+			`content="https://ryla.io/static/og.png"`,
 			`application/ld+json`,
 			`"@type":"SoftwareSourceCode"`,
 		)

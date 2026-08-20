@@ -62,11 +62,17 @@ templ SiteLayout(title string, s Site) {
 			<meta property="og:title" content={ title }/>
 			<meta property="og:description" content={ Description }/>
 			<meta property="og:url" content={ Origin + "/" }/>
-			<meta property="og:image" content={ Origin + "/og.png" }/>
+			<meta property="og:image" content={ Origin + "/static/og.png" }/>
+			// Stated so a scraper can lay out the card before it has fetched the
+			// image, and so one that never fetches it still gets the dimensions
+			// right rather than guessing.
+			<meta property="og:image:width" content="1200"/>
+			<meta property="og:image:height" content="630"/>
+			<meta property="og:image:alt" content={ Description }/>
 			<meta name="twitter:card" content="summary_large_image"/>
 			<meta name="twitter:title" content={ title }/>
 			<meta name="twitter:description" content={ Description }/>
-			<meta name="twitter:image" content={ Origin + "/og.png" }/>
+			<meta name="twitter:image" content={ Origin + "/static/og.png" }/>
 			// Structured data. SoftwareSourceCode is the accurate type for a
 			// library; SoftwareApplication would claim this is something you run.
 			@templ.Raw(structuredData(s))
