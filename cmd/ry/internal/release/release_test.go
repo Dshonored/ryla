@@ -91,3 +91,24 @@ func TestDisabledByEnvironment(t *testing.T) {
 		t.Error("CI should disable the check")
 	}
 }
+
+// TestDoubleDigitVersionsCompareNumerically is the classic version-sorting bug:
+// compared as text, "v0.9.0" sorts above "v0.10.0" and the newer release looks
+// older. Every one of these pairs is wrong under a lexical comparison.
+func TestDoubleDigitVersionsCompareNumerically(t *testing.T) {
+	tests := []struct{ current, latest string }{
+		{"v0.9.0", "v0.10.0"},
+		{"v0.2.1", "v0.10.0"},
+		{"v0.10.0", "v0.11.0"},
+		{"v1.9.9", "v1.10.0"},
+	}
+
+	for _, tc := range tests {
+		if !IsNewer(tc.current, tc.latest) {
+			t.Errorf("IsNewer(%q, %q) = false; a text comparison would give this answer", tc.current, tc.latest)
+		}
+		if IsNewer(tc.latest, tc.current) {
+			t.Errorf("IsNewer(%q, %q) = true, but that is the older one", tc.latest, tc.current)
+		}
+	}
+}

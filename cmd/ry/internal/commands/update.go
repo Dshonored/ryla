@@ -24,6 +24,7 @@ func updateCmd() *cobra.Command {
 		asJSON   bool
 		toVer    string
 		everythg bool
+		refresh  bool
 	)
 
 	cmd := &cobra.Command{
@@ -39,6 +40,10 @@ reports whether the CLI itself is also behind.
   ry update --self     update the ry command itself
   ry update --all      both
   ry update --check    report what is available, change nothing
+  ry update --refresh  ask the proxy now instead of using the daily cache
+
+Run outside a project, plain "ry update" updates the CLI, since that is the
+only thing there is to update.
 
 The CLI and the framework are one module and share a version, so keeping them
 in step is the normal case.`,
@@ -51,7 +56,7 @@ in step is the normal case.`,
 				self = true
 			}
 
-			status, err := gatherStatus(ctx)
+			status, err := gatherStatus(ctx, refresh)
 			if err != nil {
 				return err
 			}
@@ -61,6 +66,16 @@ in step is the normal case.`,
 			}
 			if check {
 				return reportStatus(out, status)
+			}
+
+			// Outside a project there is nothing to update but the CLI, and
+			// that is plainly what someone typing `ry update` in their home
+			// directory meant. Refusing with "not inside a Ryla project" is
+			// technically accurate and useless.
+			if status.Project == "" && !self {
+				fmt.Fprintln(out, "Not inside a project, so updating the ry command itself.")
+				self = true
+				return applyUpdate(ctx, out, status, true, false, toVer)
 			}
 
 			return applyUpdate(ctx, out, status, self, everythg || !self, toVer)
@@ -73,6 +88,7 @@ in step is the normal case.`,
 	f.BoolVar(&check, "check", false, "report available updates without changing anything")
 	f.BoolVar(&asJSON, "json", false, "emit the version status as JSON")
 	f.StringVar(&toVer, "to", "", "update to a specific version instead of the latest")
+	f.BoolVar(&refresh, "refresh", false, "ignore the cached version check and ask the module proxy now")
 
 	return cmd
 }
@@ -90,7 +106,7 @@ type Status struct {
 	Development       bool `json:"development"`
 }
 
-func gatherStatus(ctx context.Context) (Status, error) {
+func gatherStatus(ctx context.Context, refresh bool) (Status, error) {
 	s := Status{
 		CLI:         Version(),
 		Module:      rylaModule,
@@ -104,7 +120,11 @@ func gatherStatus(ctx context.Context) (Status, error) {
 		s.Framework = frameworkVersionOf(p)
 	}
 
-	if info, ok := release.Cached(ctx, rylaModule); ok {
+	lookup := release.Cached
+	if refresh {
+		lookup = release.Refresh
+	}
+	if info, ok := lookup(ctx, rylaModule); ok {
 		s.Latest = info.Version
 	}
 

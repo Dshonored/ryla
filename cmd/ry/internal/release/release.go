@@ -116,6 +116,24 @@ func get(ctx context.Context, module, endpoint string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }
 
+// Refresh looks the version up now, ignoring and then replacing the cache.
+//
+// The daily cache is right for a background nudge and wrong for someone who
+// just asked. Without this, `ry update --check` can only ever repeat what it
+// was told earlier, which is exactly the moment a stale answer is most
+// confusing.
+func Refresh(ctx context.Context, module string) (Info, bool) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	info, err := Latest(ctx, module)
+	if err != nil {
+		return Info{}, false
+	}
+	writeCache(cachePath(module), info, time.Now())
+	return info, true
+}
+
 // Cached returns the newest version, reusing a recent lookup when there is one.
 //
 // Every failure is silent by design: an update notice is a convenience, and a
