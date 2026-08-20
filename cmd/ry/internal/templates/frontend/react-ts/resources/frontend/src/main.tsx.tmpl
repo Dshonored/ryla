@@ -1,0 +1,23 @@
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+
+import App from "./App.tsx";
+import "./app.css";
+
+// index.html is the only place this element is declared, and TypeScript cannot
+// see into it — getElementById is typed as possibly null and it is right to be.
+// The check is here rather than a `!` so that a renamed div fails with a
+// sentence instead of "Cannot read properties of null".
+const root = document.getElementById("root");
+if (!root) {
+	throw new Error("No #root element — index.html and this file disagree.");
+}
+
+// The stylesheet is imported rather than linked from index.html so that Vite
+// owns it: in development a change to it is swapped into the running page, and
+// in a build it becomes a hashed file the browser can cache forever.
+createRoot(root).render(
+	<StrictMode>
+		<App />
+	</StrictMode>,
+);

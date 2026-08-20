@@ -136,6 +136,10 @@ func Build(ctx context.Context, p *project.Project, out io.Writer) error {
 	}
 
 	dir := p.FrontendDir()
+	if err := typeCheck(ctx, dir, node, out); err != nil {
+		return err
+	}
+
 	cmd := exec.CommandContext(ctx, node, viteEntry, "build")
 	cmd.Dir = dir
 	cmd.Stdout = out
@@ -145,6 +149,66 @@ func Build(ctx context.Context, p *project.Project, out io.Writer) error {
 	}
 
 	return writeKeepFile(dir)
+}
+
+// The two type checkers, found the same way as Vite: in node_modules, run
+// through node directly rather than through an npm script.
+//
+// svelte-check is tried first where both are present, because tsc cannot parse
+// a .svelte file — it would check the plain modules, report nothing, and leave
+// every component unexamined while looking like it had done the job.
+var checkers = []struct {
+	entry string
+	args  []string
+}{
+	// --output is stated because svelte-check picks its format from whether
+	// stdout is a terminal, and `ry build` pipes it — which would otherwise
+	// turn a type error into a line of epoch timestamps and field counts.
+	{
+		filepath.Join("node_modules", "svelte-check", "bin", "svelte-check"),
+		[]string{"--tsconfig", "./tsconfig.json", "--output", "human"},
+	},
+	{filepath.Join("node_modules", "typescript", "bin", "tsc"), []string{"--noEmit"}},
+}
+
+// typeCheck runs tsc over a TypeScript frontend before Vite compiles it.
+//
+// Vite strips types without checking them, so without this a type error reaches
+// the browser as a runtime fault while `ry build` reports success — which would
+// make choosing TypeScript buy nothing that matters.
+//
+// Whether to check is decided from what is on disk rather than from ryla.yaml,
+// so adding TypeScript to a JavaScript project is an npm install and a
+// tsconfig.json with nothing to declare anywhere else. A tsconfig with no
+// checker installed beside it means someone removed it on purpose, and that is
+// their call to make.
+func typeCheck(ctx context.Context, dir, node string, out io.Writer) error {
+	if _, err := os.Stat(filepath.Join(dir, "tsconfig.json")); err != nil {
+		return nil
+	}
+	entry, args := "", []string(nil)
+	for _, c := range checkers {
+		if _, err := os.Stat(filepath.Join(dir, c.entry)); err == nil {
+			entry, args = c.entry, c.args
+			break
+		}
+	}
+	if entry == "" {
+		return nil
+	}
+
+	fmt.Fprintln(out, "Checking types...")
+
+	cmd := exec.CommandContext(ctx, node, append([]string{entry}, args...)...)
+	cmd.Dir = dir
+	cmd.Stdout = out
+	cmd.Stderr = out
+	if err := cmd.Run(); err != nil {
+		// The checker has already printed every error above, with file and
+		// line. Adding "exit status 2" to that would only bury it.
+		return errors.New("frontend: the TypeScript check failed")
+	}
+	return nil
 }
 
 // writeKeepFile puts the placeholder back after a build.

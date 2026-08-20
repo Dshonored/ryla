@@ -1,0 +1,38 @@
+{
+	// One config for the whole frontend, rather than the two-file layout
+	// `npm create vite` emits. Vite compiles each module in isolation and never
+	// asks TypeScript to emit anything, so the split buys nothing here and
+	// costs another file to keep in step.
+	//
+	// tsc cannot parse a .svelte file, so `npm run check` is svelte-check,
+	// which reads this config and then hands each component to the compiler
+	// with its markup understood. `ry build` runs it for you.
+	"compilerOptions": {
+		"target": "ES2022",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+
+		// esbuild strips types one file at a time and never sees another
+		// module, so anything that would need cross-file knowledge to compile
+		// is an error here rather than a surprise at runtime.
+		"isolatedModules": true,
+		"verbatimModuleSyntax": true,
+		"allowImportingTsExtensions": true,
+
+		// Svelte compiles the class syntax itself and needs the fields left
+		// alone on the way through.
+		"useDefineForClassFields": true,
+
+		"strict": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUncheckedSideEffectImports": true,
+
+		// Vite owns the output. This checks types and writes nothing.
+		"noEmit": true,
+		"skipLibCheck": true
+	},
+	"include": ["src/**/*.ts", "src/**/*.svelte", "src/**/*.d.ts", "vite.config.ts"]
+}

@@ -52,21 +52,45 @@ func TestGeneratedProjectsCompile(t *testing.T) {
 				continue
 			}
 
-			t.Run(db.Name+"_"+web.Name, func(t *testing.T) {
-				t.Parallel()
-				generateAndBuild(t, root, db.Name, web.Name)
-			})
+			// A mode with a Vite frontend exists once per language: the
+			// overlays differ by more than a file extension, and a project
+			// that only ever gets built in one of them is a project where the
+			// other is broken and nobody has noticed.
+			for _, lang := range languagesFor(web) {
+				name := db.Name + "_" + web.Name
+				if lang != "" {
+					name += "_" + lang
+				}
+				t.Run(name, func(t *testing.T) {
+					t.Parallel()
+					generateAndBuild(t, root, db.Name, web.Name, lang)
+				})
+			}
 		}
 	}
 }
 
-func generateAndBuild(t *testing.T, root, db, web string) {
+// languagesFor returns the frontend languages a web mode has to be tested in.
+// Modes without a Vite frontend get the single empty answer, so the loop above
+// stays one shape.
+func languagesFor(web scaffold.WebMode) []string {
+	if web.Frontend == "" {
+		return []string{""}
+	}
+	names := make([]string, 0, len(scaffold.Languages()))
+	for _, l := range scaffold.Languages() {
+		names = append(names, l.Name)
+	}
+	return names
+}
+
+func generateAndBuild(t *testing.T, root, db, web, lang string) {
 	t.Helper()
 	ctx := context.Background()
 
 	dir := filepath.Join(t.TempDir(), "demo")
 
-	proj, err := scaffold.NewProject("demo", "demo", db, web, "dev", goLangVersion(t))
+	proj, err := scaffold.NewProject("demo", "demo", db, web, lang, "dev", goLangVersion(t))
 	if err != nil {
 		t.Fatalf("build project: %v", err)
 	}
@@ -201,7 +225,7 @@ func TestAuthScaffoldCompiles(t *testing.T) {
 	root := repoRoot(t)
 	dir := filepath.Join(t.TempDir(), "demo")
 
-	proj, err := scaffold.NewProject("demo", "demo", "sqlite", "mvc", "dev", goLangVersion(t))
+	proj, err := scaffold.NewProject("demo", "demo", "sqlite", "mvc", "", "dev", goLangVersion(t))
 	if err != nil {
 		t.Fatalf("build project: %v", err)
 	}

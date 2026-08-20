@@ -45,28 +45,20 @@ type Database struct {
 type WebMode struct {
 	Name    string
 	Overlay string
-	// Shared is an overlay applied just before Overlay, holding what this mode
-	// has in common with another. react and svelte differ only in the frontend
-	// directory: the JSON server they sit in front of is one implementation, so
-	// it is one set of templates rather than two that drift apart.
-	Shared    string
+	// Frontend names the family of frontend overlays this mode picks from,
+	// which the chosen language completes: "react" plus "ts" is the overlay
+	// frontend/react-ts. It is empty for modes with no Vite build.
+	//
+	// react and svelte differ only in that directory — the JSON server they sit
+	// in front of is one implementation, so they share one Overlay rather than
+	// keeping two copies that drift apart.
+	Frontend  string
 	UsesTempl bool
 	// UsesVite marks a mode whose frontend is compiled by Vite, which is what
 	// puts the vite flag in the generated ryla.yaml.
 	UsesVite  bool
 	Available bool
 	Summary   string
-
-	// Server marks a database that runs as a separate process. SQLite is a
-	// file and needs nothing; the rest need something listening before the
-	// first migration, which is worth settling at `ry new` rather than
-	// discovering as a connection refused.
-	Server bool
-	// ComposeImage and ComposePort describe the container `ry new` can write a
-	// compose file for. The credentials in that file are chosen to match
-	// DefaultDSN, so the generated .env works against it untouched.
-	ComposeImage string
-	ComposePort  int
 }
 
 var databases = []Database{
@@ -151,24 +143,75 @@ var webModes = []WebMode{
 		Summary:   "JSON endpoints and no views. The errors are JSON too, 404 and 500 included.",
 	},
 	{
-		Name:    "react",
-		Overlay: "web/react",
+		Name: "react",
 		// The Go half of both single-page modes: a JSON API, and one handler
 		// that proxies to Vite while developing and serves the embedded build
 		// afterwards.
-		Shared:    "web/spa",
+		Overlay:   "web/spa",
+		Frontend:  "react",
 		UsesVite:  true,
 		Available: true,
 		Summary:   "A React frontend built by Vite, embedded into the binary. JSON endpoints behind it.",
 	},
 	{
 		Name:      "svelte",
-		Overlay:   "web/svelte",
-		Shared:    "web/spa",
+		Overlay:   "web/spa",
+		Frontend:  "svelte",
 		UsesVite:  true,
 		Available: true,
 		Summary:   "A Svelte frontend built by Vite, embedded into the binary. JSON endpoints behind it.",
 	},
+}
+
+// Language is one of the languages a Vite frontend can be written in. It is a
+// separate choice from the framework because the two are independent: every
+// frontend overlay exists in both.
+type Language struct {
+	Name    string
+	Label   string
+	Summary string
+}
+
+// TypeScript is first because it is the recommendation: the API client is
+// generic over the shape each endpoint returns, and a Go server is already
+// describing those shapes in a struct, so the types are being written either
+// way — the only question is whether a compiler reads them.
+var languages = []Language{
+	{
+		Name:    "ts",
+		Label:   "TypeScript",
+		Summary: "Checked at build time. `ry build` refuses to ship a type error.",
+	},
+	{
+		Name:    "js",
+		Label:   "JavaScript",
+		Summary: "No compiler, no tsconfig, nothing to configure. Plain modules.",
+	},
+}
+
+// DefaultLanguage is what `ry new` selects when nothing says otherwise.
+const DefaultLanguage = "ts"
+
+// Languages lists every frontend language option.
+func Languages() []Language { return languages }
+
+// LookupLanguage finds a frontend language by name.
+func LookupLanguage(name string) (Language, error) {
+	for _, l := range languages {
+		if l.Name == name {
+			return l, nil
+		}
+	}
+	return Language{}, fmt.Errorf("unknown frontend language %q (available: %s)", name, strings.Join(languageNames(), ", "))
+}
+
+func languageNames() []string {
+	out := make([]string, 0, len(languages))
+	for _, l := range languages {
+		out = append(out, l.Name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Databases lists every known database option.
@@ -233,6 +276,10 @@ type Project struct {
 
 	DB  string
 	Web string
+	// Lang is the frontend language, "ts" or "js". It is only meaningful for a
+	// mode with a Vite frontend, and empty for the rest rather than carrying a
+	// value no template can use.
+	Lang string
 
 	RylaModule  string
 	RylaVersion string
@@ -258,7 +305,7 @@ func NewAppKey() (string, error) {
 }
 
 // NewProject validates the inputs and fills in everything derived from them.
-func NewProject(name, module, dbName, webName, rylaVersion, goVersion string) (*Project, error) {
+func NewProject(name, module, dbName, webName, langName, rylaVersion, goVersion string) (*Project, error) {
 	if name == "" {
 		return nil, fmt.Errorf("project name is required")
 	}
@@ -280,6 +327,21 @@ func NewProject(name, module, dbName, webName, rylaVersion, goVersion string) (*
 		return nil, err
 	}
 
+	// A language is only a question for a frontend that has one. Answering it
+	// for an mvc project would put a field in the manifest that nothing reads
+	// and that would be wrong the moment the mode changed.
+	lang := ""
+	if web.Frontend != "" {
+		if langName == "" {
+			langName = DefaultLanguage
+		}
+		l, err := LookupLanguage(langName)
+		if err != nil {
+			return nil, err
+		}
+		lang = l.Name
+	}
+
 	key, err := NewAppKey()
 	if err != nil {
 		return nil, err
@@ -291,6 +353,7 @@ func NewProject(name, module, dbName, webName, rylaVersion, goVersion string) (*
 		Package:        naming.Package(name),
 		DB:             db.Name,
 		Web:            web.Name,
+		Lang:           lang,
 		RylaModule:     RylaModule,
 		RylaVersion:    rylaVersion,
 		GoVersion:      goVersion,
@@ -303,17 +366,18 @@ func NewProject(name, module, dbName, webName, rylaVersion, goVersion string) (*
 }
 
 // Overlays returns the template overlays for this project, in application
-// order: base first, then database, then the web mode — preceded by whatever
-// that mode shares with another, so the mode's own files still win.
+// order: base first, then the database, then the web mode, and last the
+// frontend for the chosen language — so the most specific choice wins any file
+// two of them both name.
 func (p *Project) Overlays() []string {
 	db, _ := LookupDatabase(p.DB)
 	web, _ := LookupWebMode(p.Web)
 
-	overlays := []string{"base", db.Overlay}
-	if web.Shared != "" {
-		overlays = append(overlays, web.Shared)
+	overlays := []string{"base", db.Overlay, web.Overlay}
+	if web.Frontend != "" {
+		overlays = append(overlays, "frontend/"+web.Frontend+"-"+p.Lang)
 	}
-	return append(overlays, web.Overlay)
+	return overlays
 }
 
 func validModule(module string) error {

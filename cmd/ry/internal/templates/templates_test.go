@@ -70,9 +70,13 @@ func TestOverlaysExist(t *testing.T) {
 		Base, Make,
 		"db/sqlite", "db/postgres", "db/mysql", "db/mongo",
 		// web/spa is not a mode anyone can choose: it is the server half that
-		// react and svelte share, applied before whichever of them was picked.
+		// react and svelte share, applied before whichever frontend was picked.
 		// A missing one would only show up as a project with no routes.
-		"web/mvc", "web/api", "web/spa", "web/react", "web/svelte",
+		"web/mvc", "web/api", "web/spa",
+		// Every frontend exists in both languages. A missing one is a `ry new`
+		// that fails on a combination nobody happened to try.
+		"frontend/react-js", "frontend/react-ts",
+		"frontend/svelte-js", "frontend/svelte-ts",
 	} {
 		info, err := fs.Stat(FS, overlay)
 		if err != nil {

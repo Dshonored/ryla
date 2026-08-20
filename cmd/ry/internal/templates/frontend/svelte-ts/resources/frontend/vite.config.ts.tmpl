@@ -1,0 +1,36 @@
+import { defineConfig } from "vite";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
+
+// Vite's half of the arrangement `ry dev` sets up.
+//
+// The dev server is never opened directly: `ry dev` starts it on a port of its
+// own choosing and the Go server proxies everything it did not route here, so
+// there is one address to open and the API and the page share an origin. Hot
+// module replacement still comes from here — the framework only reloads the
+// browser when Go itself is rebuilt.
+//
+// `ry build` runs this same config with `vite build`, and the resulting dist/
+// is compiled into the binary by resources/embed.go.
+export default defineConfig({
+	plugins: [svelte()],
+
+	// The terminal belongs to `ry dev`, which has already printed the address
+	// to open. Letting Vite clear it would wipe that away a second later.
+	clearScreen: false,
+
+	server: {
+		// Requests arrive with the Host the browser used against the Go server.
+		// Vite allows localhost and bare IP addresses; if you reach the app
+		// through a hostname of your own, add it here or Vite will refuse the
+		// request as a possible DNS rebinding attempt.
+		// allowedHosts: ["dev.example.test"],
+	},
+
+	build: {
+		// Both named here rather than left to Vite's defaults, because
+		// resources/embed.go embeds this exact path and a compiler directive
+		// cannot follow a change made in this file.
+		outDir: "dist",
+		emptyOutDir: true,
+	},
+});

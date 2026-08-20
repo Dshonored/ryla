@@ -26,6 +26,7 @@ func newCmd() *cobra.Command {
 		module    string
 		database  string
 		web       string
+		lang      string
 		noPrompt  bool
 		skipDeps  bool
 		framework string
@@ -49,7 +50,7 @@ explicitly to skip the prompts, which is what you want in scripts and CI.
 				name = args[0]
 			}
 
-			a := answers{Name: name, Module: module, DB: database, Web: web,
+			a := answers{Name: name, Module: module, DB: database, Web: web, Lang: lang,
 				Setup: dbSetup{Mode: dbSetupIn, URL: dbURL}}
 			if noPrompt || !interactive() {
 				a.applyDefaults()
@@ -65,6 +66,7 @@ explicitly to skip the prompts, which is what you want in scripts and CI.
 	f.StringVarP(&module, "module", "m", "", "Go module path (default: the project name)")
 	f.StringVar(&database, "db", "", "database driver: "+strings.Join(availableDatabaseNames(), ", "))
 	f.StringVar(&web, "web", "", "web mode: "+strings.Join(availableWebModeNames(), ", "))
+	f.StringVar(&lang, "lang", "", "frontend language for react and svelte: "+strings.Join(languageNames(), ", "))
 	f.BoolVarP(&noPrompt, "yes", "y", false, "accept defaults instead of prompting")
 	f.BoolVar(&skipDeps, "skip-deps", false, "do not resolve dependencies or generate view code")
 	f.StringVar(&framework, "framework", "", "path to a local Ryla checkout to build against instead of the published module")
@@ -80,6 +82,7 @@ type answers struct {
 	Module string
 	DB     string
 	Web    string
+	Lang   string
 	Setup  dbSetup
 }
 
@@ -95,6 +98,9 @@ func (a *answers) applyDefaults() {
 	}
 	if a.Web == "" {
 		a.Web = "mvc"
+	}
+	if a.Lang == "" {
+		a.Lang = scaffold.DefaultLanguage
 	}
 	if a.Setup.URL != "" {
 		a.Setup.Mode = SetupExternal
@@ -149,6 +155,26 @@ func (a *answers) prompt() error {
 	if len(groups) > 0 {
 		if err := runForm(huh.NewForm(groups...)); err != nil {
 			return err
+		}
+	}
+
+	// Asked after the form rather than inside it, because whether it is a
+	// question at all depends on the web mode chosen a moment ago.
+	if a.Lang == "" {
+		web, err := scaffold.LookupWebMode(a.Web)
+		if err != nil {
+			return err
+		}
+		if web.Frontend != "" {
+			a.Lang = scaffold.DefaultLanguage
+			if err := runForm(huh.NewForm(huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Language for the " + web.Frontend + " frontend").
+					Options(languageOptions()...).
+					Value(&a.Lang),
+			))); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -231,7 +257,7 @@ func runNew(ctx context.Context, out io.Writer, a answers, skipDeps bool, framew
 		}
 	}
 
-	proj, err := scaffold.NewProject(a.Name, a.Module, a.DB, a.Web, frameworkVersion, toolchain.GoVersion(ctx))
+	proj, err := scaffold.NewProject(a.Name, a.Module, a.DB, a.Web, a.Lang, frameworkVersion, toolchain.GoVersion(ctx))
 	if err != nil {
 		return err
 	}
@@ -375,6 +401,22 @@ func databaseOptions() []huh.Option[string] {
 		opts = append(opts, huh.NewOption(d.Name+" — "+d.Summary, d.Name))
 	}
 	return opts
+}
+
+func languageOptions() []huh.Option[string] {
+	opts := make([]huh.Option[string], 0, len(scaffold.Languages()))
+	for _, l := range scaffold.Languages() {
+		opts = append(opts, huh.NewOption(l.Label+" — "+l.Summary, l.Name))
+	}
+	return opts
+}
+
+func languageNames() []string {
+	names := make([]string, 0, len(scaffold.Languages()))
+	for _, l := range scaffold.Languages() {
+		names = append(names, l.Name)
+	}
+	return names
 }
 
 func webModeOptions() []huh.Option[string] {

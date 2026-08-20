@@ -1,0 +1,31 @@
+{
+	// One config for the whole frontend, rather than the three-file project
+	// reference layout `npm create vite` emits. Vite compiles each module in
+	// isolation and never asks TypeScript to emit anything, so the split buys
+	// nothing here and costs two more files to keep in step.
+	"compilerOptions": {
+		"target": "ES2022",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"jsx": "react-jsx",
+
+		// esbuild strips types one file at a time and never sees another
+		// module, so anything that would need cross-file knowledge to compile
+		// is an error here rather than a surprise at runtime.
+		"isolatedModules": true,
+		"verbatimModuleSyntax": true,
+		"allowImportingTsExtensions": true,
+
+		"strict": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUncheckedSideEffectImports": true,
+
+		// Vite owns the output. This checks types and writes nothing.
+		"noEmit": true,
+		"skipLibCheck": true
+	},
+	"include": ["src", "vite.config.ts"]
+}

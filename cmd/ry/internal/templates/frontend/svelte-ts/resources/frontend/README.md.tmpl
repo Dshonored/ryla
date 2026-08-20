@@ -1,0 +1,69 @@
+# {{.Name}} — frontend
+
+A Svelte application in TypeScript, built by [Vite](https://vite.dev). It is
+the whole of this project's user interface; the Go side is a JSON API.
+
+## You do not run this directly
+
+```bash
+ry dev     # starts the Go server and Vite together
+ry build   # compiles this into dist/, then embeds dist/ in the binary
+```
+
+`ry dev` starts Vite on a port of its own and the Go server proxies everything
+it did not route to it, so there is one address to open — the one `ry dev`
+prints. Editing a file under `src/` updates the running page without a reload;
+editing a `.go` file rebuilds the server and reloads the browser.
+
+The scripts in `package.json` still work if you want Vite on its own
+(`npm run dev`), but calls to `/api` will 404: nothing is behind it then.
+
+## How it reaches the API
+
+Same origin, absolute paths, no base URL:
+
+```ts
+import { get, post } from "./api";
+
+const service = await get<ServiceInfo>("/api");
+```
+
+`get` and `post` are generic: you name the shape you expect and the compiler
+holds you to it everywhere the value is used. Nothing validates the response at
+runtime, so the type is an assertion — but it is the assertion you were making
+anyway, written down. Keep those declarations next to the component that uses
+them and mirror the Go structs they come from.
+
+`/api` is exempt from CSRF checks, which is why `api.ts` sends no token. Add
+your endpoints under that prefix in `routes/web.go` and they inherit the same
+treatment.
+
+## Types are checked at build time
+
+Vite strips types without checking them, so `ry build` checks them first and
+refuses to build if it fails. To check without building:
+
+```bash
+npm run check
+```
+
+The checker is `svelte-check` rather than `tsc`, because tsc cannot parse a
+`.svelte` file: it reads the same `tsconfig.json` and then hands each component
+over with its markup understood. Components opt in with `<script lang="ts">`,
+which `svelte.config.js` already arranges.
+
+## The build is embedded
+
+`vite build` writes `dist/`, and `resources/embed.go` compiles that directory
+into the Go binary. Deployment stays one file with nothing beside it — which is
+the reason this framework is written in Go, and the reason `dist/` must keep
+existing even when empty. The `.gitkeep` inside it is load-bearing: an embed
+directive that matches nothing will not compile, and without it a clone with no
+Node installed could not build the Go code at all.
+
+## Dependencies
+
+```bash
+npm install          # `ry dev` and `ry build` do this for you on the first run
+npm outdated         # what has moved on
+```

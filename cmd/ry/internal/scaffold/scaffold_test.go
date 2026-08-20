@@ -198,7 +198,7 @@ func TestProjectValidation(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := NewProject(tc.project, tc.mod, tc.db, tc.web, "dev", "1.25")
+			_, err := NewProject(tc.project, tc.mod, tc.db, tc.web, "", "dev", "1.25")
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("NewProject error = %v, wantErr = %v", err, tc.wantErr)
 			}
@@ -207,7 +207,7 @@ func TestProjectValidation(t *testing.T) {
 }
 
 func TestProjectOverlayOrder(t *testing.T) {
-	p, err := NewProject("demo", "demo", "sqlite", "mvc", "dev", "1.25")
+	p, err := NewProject("demo", "demo", "sqlite", "mvc", "", "dev", "1.25")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,17 +218,18 @@ func TestProjectOverlayOrder(t *testing.T) {
 	}
 }
 
-// TestSharedOverlayIsAppliedBeforeTheMode protects the rule that lets react and
-// svelte share one server implementation: the shared overlay has to come first,
-// or a mode could not replace anything it defines, and the sharing would become
-// a constraint instead of a convenience.
-func TestSharedOverlayIsAppliedBeforeTheMode(t *testing.T) {
-	p, err := NewProject("demo", "demo", "sqlite", "react", "dev", "1.25")
+// TestFrontendOverlayIsAppliedLast protects the rule that lets react and svelte
+// share one server implementation while differing in language: the shared
+// web/spa overlay has to come first, or the frontend could not replace anything
+// it defines and the sharing would become a constraint instead of a
+// convenience.
+func TestFrontendOverlayIsAppliedLast(t *testing.T) {
+	p, err := NewProject("demo", "demo", "sqlite", "react", "ts", "dev", "1.25")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	want := []string{"base", "db/sqlite", "web/spa", "web/react"}
+	want := []string{"base", "db/sqlite", "web/spa", "frontend/react-ts"}
 	if got := p.Overlays(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("Overlays() = %v, want %v", got, want)
 	}
@@ -248,7 +249,7 @@ func TestViteModesAreMarkedForTheManifest(t *testing.T) {
 		{web: "svelte", vite: true},
 	} {
 		t.Run(tc.web, func(t *testing.T) {
-			p, err := NewProject("demo", "demo", "sqlite", tc.web, "dev", "1.25")
+			p, err := NewProject("demo", "demo", "sqlite", tc.web, "", "dev", "1.25")
 			if err != nil {
 				t.Fatal(err)
 			}

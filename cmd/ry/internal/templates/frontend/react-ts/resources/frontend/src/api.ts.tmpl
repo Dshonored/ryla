@@ -1,0 +1,83 @@
+// Calls to this application's own JSON API.
+//
+// Every request is same-origin and every path is absolute. That is the point of
+// the dev proxy: Vite sits behind the Go server rather than beside it, so /api
+// reaches the API whether the page came from the dev server or from the
+// compiled binary. There is no base URL to configure per environment, and no
+// CORS at all.
+//
+// Nothing here sends a CSRF token, and nothing needs to: the framework's CSRF
+// middleware skips /api, because a request the browser does not attach a cookie
+// credential to cannot be forged by another site.
+
+const accept = { Accept: "application/json" };
+
+// Fields carries per-input messages from a 422, keyed by the field name the
+// server used — the same string the input is named after.
+export type Fields = Record<string, string[]>;
+
+// ErrorBody is the shape this API puts a failure in.
+interface ErrorBody {
+	error?: {
+		message?: string;
+		status?: number;
+		fields?: Fields;
+	};
+}
+
+// ApiError is thrown for any response the server refused.
+//
+// It carries the status and, for a 422, the per-field messages, so a form can
+// put each one next to the input that caused it instead of showing a single
+// sentence about the request as a whole.
+export class ApiError extends Error {
+	readonly status: number;
+	readonly fields: Fields;
+
+	constructor(message: string, status: number, fields?: Fields) {
+		super(message);
+		this.name = "ApiError";
+		this.status = status;
+		this.fields = fields ?? {};
+	}
+}
+
+// get fetches a JSON document.
+//
+// The caller names the shape it expects. That is an assertion rather than a
+// check — nothing validates the response at runtime — but it is the assertion
+// you would be making anyway, written down where the compiler can hold you to
+// it everywhere the value is used.
+export async function get<T>(path: string): Promise<T> {
+	return unwrap<T>(await fetch(path, { headers: accept }));
+}
+
+// post sends one, or nothing at all when body is omitted.
+export async function post<T>(path: string, body?: unknown): Promise<T> {
+	const options: RequestInit = { method: "POST", headers: accept };
+
+	if (body !== undefined) {
+		options.headers = { ...accept, "Content-Type": "application/json" };
+		options.body = JSON.stringify(body);
+	}
+	return unwrap<T>(await fetch(path, options));
+}
+
+// unwrap turns a response into data or an ApiError.
+//
+// The body is parsed even when the status is a failure, because this API puts
+// the reason in the body: throwing on the status alone would discard the one
+// part of the response worth showing a person.
+async function unwrap<T>(response: Response): Promise<T> {
+	const data = (await response.json().catch(() => null)) as (T & ErrorBody) | null;
+
+	if (!response.ok) {
+		const detail = data?.error ?? {};
+		throw new ApiError(
+			detail.message ?? `The server answered ${response.status}.`,
+			response.status,
+			detail.fields,
+		);
+	}
+	return data as T;
+}
