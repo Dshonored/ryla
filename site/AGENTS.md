@@ -1,0 +1,319 @@
+# ryla-site — notes for coding agents
+
+A [Ryla](https://github.com/Dshonored/ryla) application. Go 1.25,
+module `ryla-site`, sqlite database, `mvc` web mode.
+
+## Commands
+
+| Task | Command |
+| --- | --- |
+| Run with live reload | `ry dev` |
+| Build one static binary | `ry build` |
+| Apply migrations | `ry migrate` |
+| Roll back the last batch | `ry migrate:rollback` |
+| Show migration state | `ry migrate:status` |
+| List named routes | `ry routes` |
+| Run background jobs | `ry queue:work` |
+| Run recurring tasks | `ry schedule:run` |
+| Run tests | `go test ./...` |
+
+Prefer `ry` over raw `go run`: it regenerates view code first, which the build
+needs. `ry` commands accept `--json` where there is something to parse.
+
+## The demo page
+
+A new project ships a welcome page that exercises the whole stack. It is meant
+to be deleted. Removing it means: `app/controllers/demo.go`, the `/demo/counter`
+routes in `routes/web.go`, `resources/static/demo.js`, the `Env` struct in
+`resources/views/home.templ`, and the fields it reads in
+`app/controllers/home.go`.
+
+`resources/static/app.css` is not part of the demo — it is a design system of
+tokens and components. Keep it and build on it, or replace it; nothing in the
+framework depends on those class names.
+
+## Do not edit these
+
+- **`*_templ.go`** — generated from the neighbouring `.templ` file by
+  `templ generate`. Edit the `.templ` and rebuild; changes here are erased.
+- **`storage/`** — the database file, logs and build scratch. Not source.
+- **`go.sum`** — managed by `go mod tidy`.
+
+## Conventions that matter
+
+**Wiring is explicit.** There is no service container and nothing resolves at
+runtime. `app.App` is a plain struct built in `app/app.go`; controllers hold a
+`*app.App` and reach for what they need. To add a dependency, add a field to
+`App` and set it in `New` — do not introduce a global or a singleton.
+
+**Routes are hand-written.** `routes/web.go` is the table of contents for this
+application. `ry make:controller` deliberately does not edit it; it prints the
+lines to add. Keep it that way — a route table you cannot trust to be complete
+is worse than no route table.
+
+**Migrations are immutable once run.** Each one registers itself from `init` and
+carries its own schema snapshot struct rather than referencing a model in
+`app/models`. That is intentional: a migration must keep doing what it did the
+day it was written. Never edit a migration that has already been applied
+anywhere — add a new one with `ry make:migration`.
+
+**Config is read explicitly.** `config/config.go` lists every setting, its
+environment variable and its default in one place. Add new settings there with
+the typed readers (`ryconfig.String`, `.Int`, `.Bool`, `.Duration`) rather than
+calling `os.Getenv` from the code that uses them.
+
+**Real environment variables beat `.env`.** `.env` fills in what the environment
+has not already set, never the reverse.
+
+**The browser reloads itself.** `ry dev` sets RYLA_DEV, which makes the server
+inject a small script that watches an event stream. A rebuild restarts the
+process, the stream drops, and the page reloads once the new server answers.
+Nothing to configure, and it is absent from a production build.
+
+**Forms follow one shape.** Declare what a request may contain in
+`app/requests`, then bind and validate in one step:
+
+    var form requests.CreatePost
+    bag, err := validate.BindAndCheck(r, &form)
+    if err != nil { /* malformed input: 400 */ }
+    if bag.Any() { /* re-render with bag and the submitted values */ }
+
+The two failures are different on purpose: a body that is not valid JSON is not
+the same problem as an email address with a typo. On success, flash a message
+and redirect — redirecting after a POST is what stops a refresh submitting
+twice.
+
+**Every state-changing form needs a CSRF token.** Server-rendered forms embed
+`@templ.Raw(csrf.Field(ctx))`; fetch/XHR requests send the `X-CSRF-Token`
+header, reading the value from the `csrf-token` meta tag. Without it the
+middleware answers 403. Routes under `/api/` are exempt, since a bearer token
+is not attached by the browser automatically and so cannot be forged.
+
+**Authentication, if `ry make:auth` has been run.** Sessions live in the
+database, so they can be revoked. `auth.Login` regenerates the session id — do
+not skip that, it is what closes session fixation. `middleware.User(ctx)`
+returns the signed-in `*models.User` or nil. Protect routes with
+`ryauth.RequireAuth("/login")` inside a group.
+
+The scaffold covers the whole flow, not just the login form: registration, email
+verification, sign-in, sign-out, and password reset via `/forgot-password` and
+`/reset-password`. All of it is in `app/controllers/auth.go` and
+`routes/auth.go`, and all of it is yours to edit.
+
+**Password reset is a signed link, not a database row.** The token comes from
+`a.Signer` under `PurposeResetPassword` and carries the user id, so nothing has
+to be stored and a reset link cannot be replayed against `/verify`. The
+signature is re-checked when the form is submitted, never trusted from the
+hidden field alone — the expiry has to be judged then rather than when the page
+was drawn. `/forgot-password` answers the same way whether or not the address
+exists, for the same reason registration does.
+
+A completed reset calls `signOutEverywhere`, which destroys the user's other
+sessions: a reset is usually the answer to a compromise, and a live session left
+behind keeps exactly the access the reset was meant to remove. That needs a
+server-side store, so it does nothing under `SESSION_DRIVER=cookie` and logs a
+warning saying so. If you add anything else that grants access — personal access
+tokens especially — revoke it there too.
+
+Two rules the login handler follows on purpose: a wrong password and an unknown
+email produce the *same* message, or the form becomes a way to discover
+registered addresses; and the unknown-email path still runs a hash, or it
+answers faster and gives the same thing away through timing.
+
+**Auth endpoints are rate limited.** Ten submissions a minute per IP on
+/login and /register, plus five failed sign-ins per email per fifteen minutes.
+A successful login clears the per-email count. Only POSTs are counted —
+throttling the page itself would lock someone out of seeing the form, and a
+throttled page renders no CSRF token, so every later submission would fail with
+a confusing 403.
+
+`ratelimit.ClientIP(r, trustProxy)` defaults to the socket address. Set
+trustProxy to true only behind a proxy that overwrites X-Forwarded-For;
+anywhere else a caller can change the header on every request and never be
+limited at all.
+
+**Registration does not reveal whether an email is registered.** It answers
+"check your inbox" every time and puts the difference in the email — a
+confirmation link for a new address, a "you already have an account" note for an
+existing one. That is also why signup does not sign you in: doing so would make
+a successful registration observably different from one that hit an existing
+address, which is the whole leak. Following the emailed link proves control of
+the address, and that is what signs the account in.
+
+**Two-factor, if `ry make:2fa` has been run.** TOTP, with an enrolment page, a
+QR code, a challenge and single-use recovery codes.
+
+The gate is `middleware.RequireTwoFactor`, not a branch in the login handler.
+That is deliberate: a redirect from the sign-in handler would cover the one
+route it runs on, and a bookmark, an API call or a form posted from another tab
+would still walk past it with an authenticated session. Being held at the
+challenge is not the same as being signed out — the user is identified and the
+password is checked; only the second factor is missing. `/two-factor`,
+`/logout` and `/static` are exempt, or the redirect loops and a user who cannot
+answer is trapped in the session.
+
+Secrets are sealed, not hashed. The server recomputes codes from the secret on
+every sign-in, so it must be recoverable — `twofactor.Vault` encrypts it with
+AES-256-GCM under a key derived from APP_KEY, which lives in the environment
+rather than the database, so a stolen users table is inert on its own. Do not
+store a secret any other way, and do not log one.
+
+Verify through `twofactor.Verifier` rather than calling `twofactor.Verify`
+directly. A six-digit code is a million guesses, which is an afternoon's work
+unthrottled; the Verifier carries the per-account limit of five attempts a
+quarter of an hour so it cannot be left out by accident. That limiter is
+in-process, so several instances each keep their own count.
+
+Recovery codes are shown once, at enrolment, and stored only as hashes. If a
+user loses them there is nothing to recover — reissue.
+
+**Personal access tokens, for API and mobile clients.** The framework's `bearer`
+package authenticates an `Authorization: Bearer` header against tokens stored as
+SHA-256 digests, with scopes, expiry and immediate revocation. There is no
+generator for it yet, so wiring it up is by hand: a migration for the
+`personal_access_tokens` table, `bearer.New(a.DB)`, and `bearer.Authenticate`
+on the API group.
+
+The plaintext exists exactly once, when the token is created — `bearer.Create`
+returns it and nothing stores it. A settings page can list a user's tokens but
+can never show them again, which is the honest behaviour. Revocation is a
+database delete rather than a cache entry, so it takes effect on the next
+request. Routes authenticated this way are CSRF-exempt on purpose: a browser
+does not attach the header automatically, so the request cannot be forged.
+
+**Mail.** `a.Mail.Send(ctx, msg)` with messages built in `app/mails`. The log
+driver is the default outside production and prints the plain-text body, so
+confirmation and reset links are reachable locally. `MAIL_QUEUE=true` sends via
+a worker (`ry queue:work -queue mail`), so a slow mail server never delays a
+response.
+
+**Signed links.** `a.Signer.Sign(purpose, subject, ttl)` issues a token that
+needs no database row, and the purpose is part of the signature, so a link that
+confirms an address cannot be replayed to reset a password.
+
+**Background work goes in `app/jobs`.** A job is a struct whose exported
+fields are its payload, serialised on dispatch and restored before it runs.
+Dispatch with `a.Queue.Dispatch(ctx, &jobs.Thing{})`; drain with
+`ry queue:work`. Failures retry with exponential backoff and, once attempts run
+out, land in `failed_jobs` where `queue:failed` and `queue:retry` can reach
+them.
+
+Two rules jobs must follow. Keep payloads small — store an id, not a record,
+and read it fresh in Run, because by then the row may have changed. And
+tolerate running twice: a worker killed after doing the work but before
+recording it will run the job again, and no queue can promise otherwise without
+the job's help.
+
+**Cache.** `cache.Remember(ctx, a.Cache, key, ttl, compute)` returns the
+cached value or computes it. Concurrent misses for one key are collapsed into a
+single computation, so a popular key expiring cannot stampede the database. A
+cache failure is never fatal — the value is computed and returned anyway,
+because a broken cache should make an application slow, not broken.
+CACHE_DRIVER is memory (per-process) or db (shared between instances).
+
+**Scheduled work** is declared in `app/schedule`, not a crontab, so it is
+reviewed and deployed with everything else and a task calling a function that
+no longer exists fails to compile. Run with `ry schedule:run`, or
+`schedule:run --once` from a system cron. Tasks do not overlap by default: one
+slower than its interval would otherwise pile up copies of itself.
+
+**Redis is optional and opt-in.** Set CACHE_DRIVER, SESSION_DRIVER or
+QUEUE_DRIVER to `redis` and it is connected once at start-up and shared; leave
+them alone and the connection is never opened. Switching is a config change, not
+a regeneration.
+
+Pick per service rather than all at once. The database queue ties a job's
+durability to the database that queued it; Redis handles far more throughput but
+its durability is Redis's. Sessions and cache in Redis are almost always the
+right call once the app runs as more than one process.
+
+**APP_KEY signs cookies.** CSRF tokens, flash messages and sessions all depend
+on it. It is generated per project; the app refuses to start in production
+without one. Rotate with `ry key:generate --force`, which logs everyone out —
+and, if two-factor is enabled, makes every sealed TOTP secret unreadable, so
+enrolments have to be redone.
+
+**This project is on sqlite.** `database/driver.go` selects the dialect and
+`DB_DSN` in `.env` points at it. Everything above the driver is GORM, so the
+application code does not care which of SQLite, Postgres and MySQL is
+underneath — but the migrations can. Postgres wraps DDL in a transaction, so a
+failed migration leaves nothing half-built; MySQL commits DDL implicitly, so a
+migration that fails halfway leaves the earlier statements applied and needs
+fixing forward. Write migrations one table at a time and they behave the same
+everywhere.
+
+Do not reach for engine-specific SQL without a reason. If you do — a Postgres
+`jsonb` column, a MySQL fulltext index — say so in the migration's comment, so
+the next person knows the project is no longer portable.
+
+**Tests drive the real application.** `tests/example_test.go` builds the whole
+app against a throwaway in-memory SQLite database with the migrations applied,
+then makes requests through the router and its full middleware stack — sessions,
+CSRF, recovery — rather than calling a handler function. Run them with
+`go test ./...`; add one with `ry make:test Posts`.
+
+    client(t).Get("/posts").AssertOK().AssertContains("First post")
+
+`client(t)` hands back a browser-like client: its own cookies, the CSRF token
+attached to every unsafe request, and `LoginID(user.ID)` to start from a
+signed-in user. Assertions print the response body when they fail, which is
+usually the whole diagnosis. The application is built once per test binary, so
+tests share a database — clean up what you write.
+
+The helpers come from the framework's `testing` package, imported as `rytest`:
+`rytest.Env(t)` sets the environment, `rytest.Migrate(t, db)` applies the
+migrations, `rytest.New(t, cfg)` builds the client. `PostJSON`, `JSON` and
+`Delete` cover the non-form methods, and `AssertRedirect`, `AssertContains` and
+`AssertJSON` cover most of what a feature test needs to say.
+
+
+**Views are compiled.** `.templ` files become Go, so a typo or a wrong argument
+is a build error rather than a blank page. Render through the controller's
+`Render` helper, which buffers output so a failed render becomes a clean 500
+instead of half a page.
+
+## Layout
+
+```
+app/controllers/   HTTP handlers; embed Base for Render/JSON/Redirect
+app/models/        GORM models
+app/middleware/    application middleware (framework middleware is in app.New)
+app/jobs/          background work, registered from init
+app/schedule/      recurring tasks
+app/requests/      what a form may contain, and what counts as valid
+config/            typed settings
+database/migrations/  self-registering, timestamped
+database/seeders/  ordered, called from Run
+resources/views/   .templ components
+resources/static/  embedded into the binary
+routes/            the route table
+tests/             feature tests through the real router
+cmd/app/           entrypoint: build the app, register routes, run
+```
+
+## Generators
+
+```bash
+ry make:model Post                 # model + create-table migration
+ry make:controller Posts --resource  # the seven CRUD handlers
+ry make:migration add_slug_to_posts
+ry make:middleware EnsureAdmin
+ry make:auth                       # registration, sign-in, sign-out, password reset
+ry make:2fa                        # TOTP two-factor, on top of make:auth
+ry make:job SendWelcomeEmail       # background job
+ry make:request CreatePost
+ry make:seeder Users
+ry make:test Posts                 # feature test against the real router
+```
+
+Names may be given singular or plural; `Post` and `Posts` both produce the
+`posts` table and `/posts` routes.
+
+## Before you finish
+
+```bash
+ry build && go test ./...
+```
+
+`ry build` runs view generation, so it catches template errors that `go build`
+alone will not.

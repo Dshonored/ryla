@@ -293,15 +293,16 @@ testing helpers, the generators, and the `dev`/`build`/`start` loop. The Redis
 drivers for cache, sessions and the queue are tested against an in-process
 server speaking the real protocol, so the actual client and Lua scripts run.
 
-**Built, and covered end to end.** Every one of the sixteen database × web-mode
-combinations is scaffolded into a temporary directory on each CI run and checked
-to build, vet, test and be gofmt-clean, on Linux, macOS and Windows. The
-`make:auth` scaffold gets the same treatment across every web mode on both
-SQLite and MongoDB, and the feature tests it ships run as part of it — so the
-sign-in flow is exercised, not merely compiled. `make:2fa` gets the same
-treatment, and its feature tests enrol, answer a challenge, spend a recovery
-code and turn the whole thing off again. This is the test that matters most:
-templates are text, so nothing else in the build would catch a broken one.
+**Built, and covered end to end.** Every one of the twenty-four database ×
+web-mode × frontend-language combinations is scaffolded into a temporary
+directory on each CI run and checked to build, vet, test and be gofmt-clean, on
+Linux, macOS and Windows. The `make:auth` scaffold gets the same treatment
+across every web mode on both SQLite and MongoDB, and the feature tests it ships
+run as part of it — so the sign-in flow is exercised, not merely compiled.
+`make:2fa` gets the same treatment, and its feature tests enrol, answer a
+challenge, spend a recovery code and turn the whole thing off again. This is the
+test that matters most: templates are text, so nothing else in the build would
+catch a broken one.
 
 **Built, and integration-tested against a real server.** MongoDB — the driver,
 and the cache, session and queue stores built on it — runs against a `mongo:7`

@@ -1,0 +1,337 @@
+package views
+
+// The Ryla website.
+//
+// Every version string on the page comes from Site.Version, which the
+// controller fills from ryla.Version() — read out of build info rather than a
+// constant, so it cannot advertise a release that does not exist.
+
+// Two things bite when writing prose in a .templ file, and both did here: a
+// bare @ starts a component call (so the version selector below goes through a
+// Go string), and a text line beginning with `for`, `if` or `switch` is read as
+// control flow (so those words never start a wrapped line).
+
+// Site is what the landing page renders against.
+type Site struct {
+	// Version is the framework version this binary was built against.
+	Version string
+	// Repo is the GitHub path, named in both the header and the footer.
+	Repo string
+}
+
+// URL returns the repository address.
+func (s Site) URL() string { return "https://github.com/" + s.Repo }
+
+// ReleasesURL is where the version chip points.
+func (s Site) ReleasesURL() string { return s.URL() + "/releases" }
+
+// LicenseURL is the MIT text.
+func (s Site) LicenseURL() string { return s.URL() + "/blob/main/LICENSE" }
+
+// Battery is one of the things the framework already ships.
+type Battery struct {
+	Name, Cmd, Body string
+}
+
+// Stat is a measurement on the deploy section.
+type Stat struct {
+	Label, Value, Unit string
+}
+
+// Status is one row of the honest status table.
+type Status struct {
+	State, Tone, What string
+}
+
+templ SiteLayout(title string, s Site) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<meta name="color-scheme" content="dark light"/>
+			<title>{ title }</title>
+			<meta name="description" content={ Description }/>
+			<link rel="canonical" href={ Origin + "/" }/>
+			// Open Graph and Twitter cards. A framework gets shared as a link in
+			// chat far more often than it gets found in a search result, so the
+			// card is the first impression more often than the page is.
+			<meta property="og:type" content="website"/>
+			<meta property="og:site_name" content="Ryla"/>
+			<meta property="og:title" content={ title }/>
+			<meta property="og:description" content={ Description }/>
+			<meta property="og:url" content={ Origin + "/" }/>
+			<meta property="og:image" content={ Origin + "/og.png" }/>
+			<meta name="twitter:card" content="summary_large_image"/>
+			<meta name="twitter:title" content={ title }/>
+			<meta name="twitter:description" content={ Description }/>
+			<meta name="twitter:image" content={ Origin + "/og.png" }/>
+			// Structured data. SoftwareSourceCode is the accurate type for a
+			// library; SoftwareApplication would claim this is something you run.
+			@templ.Raw(structuredData(s))
+			<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%20fill%3D%22none%22%3E%3ClinearGradient%20id%3D%22l%22%20x1%3D%2244%22%20y1%3D%2254%22%20x2%3D%2274%22%20y2%3D%2282%22%20gradientUnits%3D%22userSpaceOnUse%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23ededed%22%2F%3E%3Cstop%20offset%3D%22.65%22%20stop-color%3D%22%230072f5%22%2F%3E%3C%2FlinearGradient%3E%3Cpath%20d%3D%22M28%2018V82%22%20stroke%3D%22%23ededed%22%20stroke-width%3D%2214%22%2F%3E%3Cpath%20d%3D%22M28%2018H58L72%2032V40L58%2054H28%22%20stroke%3D%22%23ededed%22%20stroke-width%3D%2214%22%2F%3E%3Cpath%20d%3D%22M44%2054L74%2082%22%20stroke%3D%22url%28%23l%29%22%20stroke-width%3D%2214%22%2F%3E%3C%2Fsvg%3E"/>
+			<link rel="stylesheet" href="/static/app.css"/>
+			<link rel="stylesheet" href="/static/site.css"/>
+		</head>
+		<body>
+			<div class="progress-track"><div class="progress-bar" data-progress></div></div>
+			@siteNav(s)
+			{ children... }
+			@siteFooter(s)
+			<script type="module" src="/static/choreography.js"></script>
+		</body>
+	</html>
+}
+
+templ rylaMark(size string) {
+	<svg width={ size } height={ size } viewBox="0 0 100 100" fill="none" aria-hidden="true">
+		<linearGradient id="rm" x1="44" y1="54" x2="74" y2="82" gradientUnits="userSpaceOnUse">
+			<stop offset="0" stop-color="#ededed"></stop>
+			<stop offset="0.65" stop-color="#0072f5"></stop>
+		</linearGradient>
+		<path d="M28 18V82" stroke="#ededed" stroke-width="14"></path>
+		<path d="M28 18H58L72 32V40L58 54H28" stroke="#ededed" stroke-width="14"></path>
+		<path d="M44 54L74 82" stroke="url(#rm)" stroke-width="14"></path>
+	</svg>
+}
+
+templ githubMark(size string) {
+	<svg width={ size } height={ size } viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+		<path d="M12 2C6.48 2 2 6.48 2 12c0 4.42 2.87 8.17 6.84 9.5.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 22 12c0-5.52-4.48-10-10-10z"></path>
+	</svg>
+}
+
+templ copyMark() {
+	<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+		<rect x="9" y="9" width="13" height="13" rx="1"></rect>
+		<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+	</svg>
+}
+
+templ siteNav(s Site) {
+	<header class="nav">
+		<div class="nav-left">
+			<a class="brand" href="/">
+				@rylaMark("18")
+				<span>Ryla</span>
+			</a>
+			<nav class="nav-links">
+				<a href={ templ.SafeURL(s.URL() + "#readme") }>Docs</a>
+				<a href={ templ.SafeURL(s.URL() + "#the-cli") }>CLI</a>
+				<a href="#batteries">Batteries</a>
+				<a href="#status">Status</a>
+			</nav>
+		</div>
+		<div class="nav-right">
+			<a class="repo-chip" href={ templ.SafeURL(s.URL()) }>
+				@githubMark("14")
+				<span class="repo-path">{ s.Repo }</span>
+			</a>
+			<a class="version-chip" href={ templ.SafeURL(s.ReleasesURL()) }>{ s.Version }</a>
+		</div>
+	</header>
+}
+
+// installCommand is the one that works today. It is long enough that the hero
+// pill is sized around it rather than the other way round.
+templ installLine(id string) {
+	<div class="install" data-copy id={ id }>
+		<span class="install-prompt">$</span>
+		<code class="install-cmd">curl -fsSL <span class="install-host">ryla.io/</span>install.sh | sh</code>
+		<span class="install-sep"></span>
+		<button class="install-copy" type="button" aria-label="Copy install command">
+			@copyMark()
+		</button>
+	</div>
+}
+
+templ Landing(s Site, batteries []Battery, stats []Stat, statuses []Status) {
+	@SiteLayout("Ryla — a batteries-included web framework for Go", s) {
+		<section class="hero" data-hero>
+			<span class="badge">Pre-1.0 · { s.Version }</span>
+			<h1 class="hero-title">Laravel's productivity.<br/>Go's deploy story.</h1>
+			<p class="hero-sub">
+				A batteries-included web framework for Go. Routing, ORM, migrations, auth,
+				queues, mail, cache and a scheduler already wired together — and a CLI that
+				writes the boilerplate as real Go files you can read, step through and delete.
+			</p>
+			@installLine("install-hero")
+			<p class="hero-alt">
+				macOS · Linux <span class="dim">/</span> Windows or already have Go:
+				<code>{ "go install github.com/Dshonored/ryla/cmd/ry@latest" }</code>
+			</p>
+			<p class="hero-note">
+				The script installs a Go toolchain if the machine has none. Go is not optional for
+				a Go framework, so installing it is part of installing Ryla.
+			</p>
+		</section>
+
+		<section class="band">
+			<div class="split">
+				<div class="stack" data-reveal>
+					<span class="eyebrow">One command</span>
+					<h2>Answer four questions.<br/>Get a project that runs.</h2>
+					<p class="lead">
+						<code>ry new</code> picks a database, a web mode, a frontend language and a
+						stylesheet, then wires them together. Every combination compiles —
+						twenty-four of them are scaffolded and built on every CI run, on Linux,
+						macOS and Windows.
+					</p>
+					<dl class="choices">
+						<dt>Database</dt>
+						<dd>sqlite · postgres · mysql · mongo</dd>
+						<dt>Web mode</dt>
+						<dd>mvc · api · react · svelte</dd>
+						<dt>Frontend</dt>
+						<dd>TypeScript or JavaScript</dd>
+						<dt>Styling</dt>
+						<dd>Tailwind or plain CSS</dd>
+					</dl>
+				</div>
+
+				<div class="term" data-reveal>
+					<div class="term-bar">
+						<i></i><i></i><i></i>
+						<span>ZSH</span>
+					</div>
+					<pre class="term-body">
+						@templ.Raw(TermNew)
+					</pre>
+				</div>
+			</div>
+		</section>
+
+		<section class="band" id="batteries">
+			<div class="wrap">
+				<div class="stack head" data-reveal>
+					<span class="eyebrow">Batteries</span>
+					<h2>Everything is already wired together.</h2>
+					<p class="lead">
+						Not a list of packages you assemble. One framework where the session store,
+						the queue driver and the mailer already know about each other.
+					</p>
+				</div>
+				<div class="grid-3" data-reveal-group>
+					for _, b := range batteries {
+						<article class="cell">
+							<div class="cell-top">
+								<span class="cell-name">{ b.Name }</span>
+								<span class="cell-cmd">{ b.Cmd }</span>
+							</div>
+							<p>{ b.Body }</p>
+						</article>
+					}
+				</div>
+			</div>
+		</section>
+
+		<section class="band">
+			<div class="split">
+				<div class="code" data-reveal>
+					<div class="code-bar">
+						<span>app/controllers/posts.go</span>
+						<span class="tag">GENERATED</span>
+					</div>
+					<pre class="code-body">
+						@templ.Raw(CodePosts)
+					</pre>
+				</div>
+
+				<div class="stack" data-reveal>
+					<span class="eyebrow">No magic</span>
+					<h2>No container.<br/>No facades.</h2>
+					<p class="lead">
+						<code>App</code> is a plain struct. Controllers hold a pointer to it and
+						reach for what they need. Every dependency is visible, and the compiler
+						checks all of it — nothing resolves at runtime, so nothing surprises you
+						at 2am.
+					</p>
+					<div class="note">
+						<p><b>Generators never edit your files.</b> <code>ry make:controller</code> writes a new file and prints the route lines to add. <code>routes/web.go</code> stays a table of contents you can trust.</p>
+					</div>
+					<div class="note">
+						<p><b>Views are compiled.</b> templ turns components into Go, so a typo or a wrong prop is a build error rather than a blank space in production.</p>
+					</div>
+				</div>
+			</div>
+		</section>
+
+		<section class="band">
+			<div class="wrap center">
+				<div class="stack head center-text" data-reveal>
+					<span class="eyebrow">Deploy</span>
+					<h2>One file lands on the server.</h2>
+					<p class="lead">
+						<code>ry build</code> compiles the views, the frontend bundle and the static
+						assets into a single static binary that carries its own commands. The machine
+						that runs it needs no Go toolchain, no Node, and no <code>ry</code>.
+					</p>
+				</div>
+				<div class="grid-4" data-reveal-group>
+					for _, st := range stats {
+						<div class="cell">
+							<span class="cell-name">{ st.Label }</span>
+							<div class="stat">
+								<b>{ st.Value }</b>
+								<span>{ st.Unit }</span>
+							</div>
+						</div>
+					}
+				</div>
+				<div class="term wide" data-reveal>
+					<pre class="term-body">
+						@templ.Raw(TermBuild)
+					</pre>
+				</div>
+			</div>
+		</section>
+
+		<section class="band" id="status">
+			<div class="wrap">
+				<div class="stack head" data-reveal>
+					<span class="eyebrow">Status</span>
+					<h2>Pre-1.0, and specific about it.</h2>
+					<p class="lead">
+						"It compiles" and "it works" are not the same claim, so the docs sort features
+						by how well each one is actually tested rather than by whether it is finished.
+					</p>
+				</div>
+				<div class="table" data-reveal-group>
+					for _, row := range statuses {
+						<div class="row">
+							<div class="row-state">
+								<i style={ "background:" + row.Tone }></i>
+								<span style={ "color:" + row.Tone }>{ row.State }</span>
+							</div>
+							<span class="row-what">{ row.What }</span>
+						</div>
+					}
+				</div>
+			</div>
+		</section>
+
+		<section class="cta">
+			<div class="wrap center" data-reveal>
+				<h2>Start with one command.</h2>
+				<p class="lead center-text">
+					Scaffold, migrate and run in under a minute. Delete it just as fast if it is
+					not for you.
+				</p>
+				@installLine("install-cta")
+				<a class="docs-link" href={ templ.SafeURL(s.URL() + "#readme") }>READ THE DOCS →</a>
+			</div>
+		</section>
+	}
+}
+
+templ siteFooter(s Site) {
+	<footer class="foot">
+		<div class="foot-left">
+			@rylaMark("15")
+			<a href={ templ.SafeURL(s.URL()) }>github.com/{ s.Repo }</a>
+			<span class="dim">·</span>
+			<a class="dim" href={ templ.SafeURL(s.LicenseURL()) }>MIT</a>
+		</div>
+		<span class="dim">Served by Ryla { s.Version }</span>
+	</footer>
+}

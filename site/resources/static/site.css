@@ -1,0 +1,715 @@
+/* ---------------------------------------------------------------------------
+   The Ryla website.
+
+   app.css already carries the design system — the ramp, the type scale, the
+   radii, the motion tokens. This file adds only what a marketing page needs on
+   top of it, and every value below is a token from there.
+   --------------------------------------------------------------------------- */
+
+/* --- Reading progress ---------------------------------------------------- */
+
+/* The one scroll-linked element on the page. It sits above the nav rather than
+   under it so it never overlaps the border it would otherwise sit on. */
+.progress-track {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 2px;
+	background: transparent;
+	z-index: 20;
+}
+
+.progress-bar {
+	height: 100%;
+	background: var(--accent);
+	transform: scaleX(0);
+	transform-origin: left;
+}
+
+/* Without the script, the bar is simply not drawn. A full-width blue rule
+   would read as "loaded", which is the opposite of what it means. */
+html[data-motion="off"] .progress-bar {
+	transform: scaleX(0);
+}
+
+/* --- Nav ----------------------------------------------------------------- */
+
+.nav {
+	position: sticky;
+	top: 0;
+	z-index: 10;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	height: 56px;
+	padding: 0 var(--space-10);
+	border-bottom: 1px solid var(--border-subtle);
+	background: color-mix(in srgb, var(--bg-app) 85%, transparent);
+	backdrop-filter: blur(8px);
+}
+
+.nav-left,
+.nav-right {
+	display: flex;
+	align-items: center;
+	gap: var(--space-8);
+}
+
+.nav-right {
+	gap: var(--space-2);
+}
+
+.brand {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	color: var(--text-primary);
+	font-size: var(--text-md);
+	font-weight: var(--weight-semibold);
+	letter-spacing: var(--tracking-tight);
+}
+
+.brand:hover {
+	text-decoration: none;
+}
+
+.nav-links {
+	display: flex;
+	align-items: center;
+	gap: var(--space-5);
+}
+
+.nav-links a {
+	color: var(--text-secondary);
+	font-size: var(--text-sm);
+}
+
+.nav-links a:hover {
+	color: var(--text-primary);
+	text-decoration: none;
+}
+
+/* The repository is named, not implied. A button reading "GitHub" says which
+   site you are going to, not which project you are looking at. */
+.repo-chip,
+.version-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	height: 30px;
+	padding: 0 11px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+	transition: border-color var(--dur-fast) var(--ease-standard);
+}
+
+.repo-chip {
+	color: var(--text-primary);
+}
+
+.version-chip {
+	background: var(--bg-subtle);
+	color: var(--text-secondary);
+	letter-spacing: var(--tracking-wide);
+}
+
+.repo-chip:hover,
+.version-chip:hover {
+	border-color: var(--border-strong);
+	text-decoration: none;
+}
+
+/* --- Sections ------------------------------------------------------------ */
+
+.hero,
+.band,
+.cta {
+	padding: var(--space-20) var(--space-10);
+	border-bottom: 1px solid var(--border-subtle);
+}
+
+.hero {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	padding-top: 112px;
+	/* The one permitted flourish, and the same wash the sign-in card uses. */
+	background-image: radial-gradient(ellipse 800px 400px at 50% -10%, var(--gray-3) 0%, var(--bg-app) 70%);
+}
+
+.hero-title {
+	max-width: 900px;
+	font-size: 62px;
+	line-height: 1.04;
+	letter-spacing: -0.035em;
+	text-align: center;
+	text-wrap: balance;
+}
+
+.hero-sub {
+	max-width: 620px;
+	margin-top: var(--space-6);
+	font-size: 17px;
+	line-height: 1.55;
+	color: var(--text-secondary);
+	text-align: center;
+	text-wrap: pretty;
+}
+
+.hero-alt {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: var(--space-2);
+	margin-top: var(--space-4);
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+	color: var(--text-disabled);
+}
+
+.hero-alt code {
+	border: none;
+	background: none;
+	padding: 0;
+	color: var(--text-muted);
+	font-size: inherit;
+}
+
+.hero-note {
+	margin-top: var(--space-8);
+	max-width: 560px;
+	text-align: center;
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+	line-height: 1.6;
+}
+
+.wrap {
+	max-width: 1080px;
+	margin: 0 auto;
+}
+
+.wrap.center {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--space-4);
+}
+
+.center-text {
+	text-align: center;
+	align-items: center;
+}
+
+.split {
+	max-width: 1080px;
+	margin: 0 auto;
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: var(--space-16);
+	align-items: center;
+}
+
+.stack {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-5);
+}
+
+.head {
+	margin-bottom: var(--space-12);
+}
+
+.eyebrow {
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+	letter-spacing: var(--tracking-caps);
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+
+.band h2,
+.cta h2 {
+	font-size: var(--text-3xl);
+	letter-spacing: -0.03em;
+	line-height: 1.1;
+}
+
+.cta h2 {
+	font-size: 40px;
+	text-align: center;
+}
+
+.lead {
+	max-width: 620px;
+	font-size: var(--text-md);
+	color: var(--text-secondary);
+	line-height: 1.6;
+	text-wrap: pretty;
+}
+
+.lead.center-text {
+	max-width: 480px;
+}
+
+/* --- Install line -------------------------------------------------------- */
+
+.install {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	margin-top: var(--space-10);
+	padding: 0 14px;
+	height: 46px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-subtle);
+	transition: border-color var(--dur-fast) var(--ease-standard);
+}
+
+.install:hover {
+	border-color: var(--border-strong);
+}
+
+.install-prompt {
+	color: var(--text-disabled);
+	font-family: var(--font-mono);
+	font-size: var(--text-base);
+}
+
+.install-cmd {
+	border: none;
+	background: none;
+	padding: 0;
+	font-family: var(--font-mono);
+	font-size: var(--text-base);
+	color: var(--text-primary);
+	white-space: nowrap;
+}
+
+/* The host is dimmed so the eye lands on curl and install.sh — the two parts
+   that tell you what the command does. */
+.install-host {
+	color: var(--text-secondary);
+}
+
+.install-sep {
+	width: 1px;
+	height: 20px;
+	margin: 0 var(--space-1);
+	background: var(--border-subtle);
+}
+
+.install-copy {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	border: none;
+	background: none;
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: color var(--dur-fast) var(--ease-standard);
+}
+
+.install-copy:hover {
+	color: var(--text-primary);
+	opacity: 1;
+}
+
+.install.copied .install-copy {
+	color: var(--success);
+}
+
+/* --- Choice list --------------------------------------------------------- */
+
+.choices {
+	margin: var(--space-2) 0 0;
+	display: grid;
+	grid-template-columns: 88px 1fr;
+	gap: var(--space-3) var(--space-4);
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+}
+
+.choices dt {
+	color: var(--text-disabled);
+	font-size: var(--text-xs);
+	letter-spacing: var(--tracking-caps);
+	text-transform: uppercase;
+	align-self: center;
+}
+
+.choices dd {
+	margin: 0;
+	color: var(--gray-11);
+}
+
+/* --- Terminal and code panels -------------------------------------------- */
+
+.term,
+.code {
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-sm);
+	background: var(--bg-subtle);
+	overflow: hidden;
+}
+
+.term.wide {
+	width: 100%;
+	margin-top: var(--space-5);
+}
+
+.term-bar,
+.code-bar {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	height: 34px;
+	padding: 0 14px;
+	border-bottom: 1px solid var(--border-subtle);
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+}
+
+.code-bar {
+	justify-content: space-between;
+}
+
+.term-bar i {
+	width: 8px;
+	height: 8px;
+	border-radius: var(--radius-full);
+	background: var(--border-subtle);
+}
+
+.term-bar span {
+	margin-left: var(--space-1);
+	letter-spacing: 0.06em;
+}
+
+.code-bar .tag {
+	letter-spacing: 0.06em;
+	color: var(--text-disabled);
+}
+
+.term-body,
+.code-body {
+	margin: 0;
+	padding: 18px;
+	font-family: var(--font-mono);
+	font-size: 12.5px;
+	line-height: 1.85;
+	color: var(--gray-11);
+	overflow-x: auto;
+}
+
+.c-dim { color: var(--text-disabled); }
+.c-mut { color: var(--text-secondary); }
+.c-fg  { color: var(--text-primary); }
+.c-acc { color: var(--blue-fg); }
+.c-ok  { color: var(--success); }
+.c-key { color: var(--purple); }
+.c-typ { color: var(--text-muted); }
+.c-fn  { color: var(--blue-fg); }
+
+/* The one loop on the page. A still terminal reads as a screenshot. */
+.caret {
+	display: inline-block;
+	width: 8px;
+	height: 15px;
+	margin-left: 6px;
+	vertical-align: -2px;
+	background: var(--text-primary);
+	animation: caret 1.1s steps(1) infinite;
+}
+
+@keyframes caret {
+	0%, 49% { opacity: 1; }
+	50%, 100% { opacity: 0; }
+}
+
+/* --- Grids --------------------------------------------------------------- */
+
+/* One hairline between cells rather than a border on each, so the grid reads
+   as a single ruled surface. */
+.grid-3,
+.grid-4,
+.table {
+	display: grid;
+	gap: 1px;
+	background: var(--border-subtle);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-sm);
+	overflow: hidden;
+}
+
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; margin-top: var(--space-8); }
+.table  { grid-template-columns: 1fr; width: 100%; }
+
+.cell {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: 22px 24px;
+	min-height: 132px;
+	background: var(--surface-card);
+}
+
+.grid-4 .cell {
+	min-height: 0;
+	padding: 20px 22px;
+}
+
+.cell-top {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.cell-name {
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+	letter-spacing: var(--tracking-caps);
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+
+.cell-cmd {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	letter-spacing: 0.06em;
+	color: var(--text-disabled);
+}
+
+.cell p {
+	font-size: 13.5px;
+	color: var(--gray-11);
+	line-height: 1.55;
+	text-wrap: pretty;
+}
+
+.stat {
+	display: flex;
+	align-items: baseline;
+	gap: 7px;
+}
+
+.stat b {
+	font-size: var(--text-2xl);
+	font-weight: var(--weight-semibold);
+	letter-spacing: -0.03em;
+	color: var(--text-primary);
+	font-variant-numeric: tabular-nums;
+}
+
+.stat span {
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+}
+
+/* --- Status table -------------------------------------------------------- */
+
+.row {
+	display: grid;
+	grid-template-columns: 190px 1fr;
+	gap: var(--space-6);
+	padding: 16px 20px;
+	background: var(--surface-card);
+	align-items: center;
+}
+
+.row-state {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+}
+
+.row-state i {
+	width: 6px;
+	height: 6px;
+	border-radius: var(--radius-full);
+	flex: 0 0 6px;
+}
+
+.row-what {
+	font-size: 13.5px;
+	color: var(--text-secondary);
+	line-height: 1.55;
+}
+
+/* --- Notes --------------------------------------------------------------- */
+
+.note {
+	padding: 14px;
+	background: var(--bg-subtle);
+	border: 1px solid var(--border-subtle);
+	border-left: 2px solid var(--border);
+	border-radius: var(--radius-sm);
+}
+
+.note p {
+	font-size: 13.5px;
+	color: var(--text-secondary);
+	line-height: 1.55;
+}
+
+.note b {
+	color: var(--text-primary);
+	font-weight: var(--weight-semibold);
+}
+
+/* --- CTA and footer ------------------------------------------------------ */
+
+.cta {
+	border-bottom: none;
+	padding: 104px var(--space-10);
+	background-image: radial-gradient(ellipse 700px 300px at 50% 110%, var(--gray-3) 0%, var(--bg-app) 70%);
+}
+
+.cta .wrap {
+	max-width: 720px;
+	gap: var(--space-5);
+}
+
+.docs-link {
+	margin-top: var(--space-1);
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+	letter-spacing: 0.06em;
+	color: var(--text-muted);
+}
+
+.foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-4);
+	padding: var(--space-10);
+	border-top: 1px solid var(--border-subtle);
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+}
+
+.foot-left {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+.foot a {
+	color: var(--text-secondary);
+}
+
+.foot .dim,
+.hero-alt .dim {
+	color: var(--text-disabled);
+}
+
+/* --- Reveal floor -------------------------------------------------------- */
+
+/* Deliberately NOT opacity: 0 here. The animation supplies its own starting
+   opacity, so a page whose script never loads is fully readable rather than a
+   column of invisible sections. */
+[data-reveal],
+[data-reveal-group] > * {
+	opacity: 1;
+}
+
+/* --- Phone --------------------------------------------------------------- */
+
+@media (max-width: 62rem) {
+	.split {
+		grid-template-columns: 1fr;
+		gap: var(--space-10);
+	}
+
+	.grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 40rem) {
+	.hero,
+	.band,
+	.cta {
+		padding: var(--space-12) var(--space-4);
+	}
+
+	.hero { padding-top: var(--space-16); }
+
+	.nav {
+		padding: 0 var(--space-4);
+		gap: var(--space-2);
+	}
+
+	/* The path does not fit beside the wordmark, so the mark stands alone and
+	   the accessible name carries the repository. */
+	.nav-links,
+	.repo-path {
+		display: none;
+	}
+
+	.repo-chip {
+		width: 44px;
+		justify-content: center;
+		padding: 0;
+	}
+
+	.hero-title { font-size: 34px; }
+	.cta h2 { font-size: 28px; }
+	.band h2 { font-size: var(--text-2xl); }
+
+	.grid-3,
+	.grid-4 { grid-template-columns: 1fr; }
+
+	.row {
+		grid-template-columns: 1fr;
+		gap: var(--space-2);
+	}
+
+	/* 72 characters will not fit on a phone, so the command wraps rather than
+	   being truncated: a copy target you cannot read is not a copy target. */
+	.install {
+		width: 100%;
+		height: auto;
+		align-items: flex-start;
+		padding: 12px;
+	}
+
+	.install-cmd {
+		flex: 1;
+		min-width: 0;
+		font-size: 12.5px;
+		line-height: 1.6;
+		white-space: normal;
+		word-break: break-all;
+	}
+
+	.install-sep { display: none; }
+
+	.install-copy {
+		width: 34px;
+		height: 34px;
+		margin: -5px -6px 0 0;
+		flex: 0 0 34px;
+	}
+
+	.foot {
+		flex-direction: column;
+		align-items: flex-start;
+		gap: var(--space-2);
+		padding: var(--space-6) var(--space-4);
+	}
+}

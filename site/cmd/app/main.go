@@ -1,0 +1,38 @@
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"ryla-site/app"
+	appschedule "ryla-site/app/schedule"
+	"ryla-site/routes"
+)
+
+func main() {
+	os.Exit(run())
+}
+
+// run exists so that deferred cleanup actually happens: os.Exit skips defers,
+// so main must not own both the exit code and the shutdown.
+func run() int {
+	a, err := app.New()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	defer a.Close()
+
+	// Routes and scheduled tasks are registered here rather than inside app.New,
+	// so those packages can depend on app without a cycle. This is the one
+	// place that sees the whole application, which is exactly where wiring
+	// belongs.
+	routes.Register(a)
+	appschedule.Register(a, a.Scheduler)
+
+	if err := a.Commands().Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	return 0
+}

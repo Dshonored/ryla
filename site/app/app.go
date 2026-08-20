@@ -1,0 +1,276 @@
+// Package app wires this application's dependencies together.
+//
+// There is no service container and nothing is resolved at runtime: App is a
+// plain struct, every field is set in New, and the compiler checks all of it.
+// Handlers receive *App and reach for what they need.
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"strings"
+
+	"gorm.io/gorm"
+
+	goredis "github.com/redis/go-redis/v9"
+
+	"github.com/Dshonored/ryla/auth"
+	"github.com/Dshonored/ryla/cache"
+	cacheredis "github.com/Dshonored/ryla/cache/redis"
+	"github.com/Dshonored/ryla/cookie"
+	"github.com/Dshonored/ryla/csrf"
+	rydb "github.com/Dshonored/ryla/db"
+	"github.com/Dshonored/ryla/flash"
+	rylog "github.com/Dshonored/ryla/log"
+	"github.com/Dshonored/ryla/mail"
+	"github.com/Dshonored/ryla/middleware"
+	"github.com/Dshonored/ryla/queue"
+	queueredis "github.com/Dshonored/ryla/queue/redis"
+	ryredis "github.com/Dshonored/ryla/redis"
+	"github.com/Dshonored/ryla/router"
+	"github.com/Dshonored/ryla/schedule"
+	"github.com/Dshonored/ryla/session"
+	sessionredis "github.com/Dshonored/ryla/session/redis"
+
+	"ryla-site/config"
+
+	// Registers the SQL driver this project was generated for.
+	_ "ryla-site/database"
+	// Registers every migration in database/migrations with the runner.
+	_ "ryla-site/database/migrations"
+	// Registers every background job, so a worker can run them by name.
+	_ "ryla-site/app/jobs"
+)
+
+// devKey stands in for APP_KEY when it is missing outside production. It is a
+// fixed, published value: signatures made with it are worthless, which is the
+// point — it keeps a fresh checkout running without ever looking like security.
+const devKey = "ryla-insecure-development-key"
+
+// App holds everything the application needs at runtime.
+type App struct {
+	Config  *config.Config
+	Log     *slog.Logger
+	DB      *gorm.DB
+	Router  *router.Router
+	Cookies *cookie.Jar
+	Flash   *flash.Store
+	Session session.Store
+	Queue   *queue.Dispatcher
+	Mail    mail.Mailer
+	Signer  *auth.Signer
+	Cache   cache.Store
+
+	// Scheduler is empty until main registers the tasks. Like routes, that
+	// happens outside this package: app/schedule needs the App, so this package
+	// cannot import it back without a cycle.
+	Scheduler *schedule.Scheduler
+
+	// Redis is nil unless a driver asked for it.
+	Redis *goredis.Client
+
+	// QueueDriver is where jobs are stored. The worker commands read it, so
+	// that dispatching and draining can never disagree about which backend is
+	// in use.
+	QueueDriver queue.Driver
+}
+
+// New builds the application: configuration, logging, database, cookies and the
+// router with its global middleware stack. Routes are registered separately, by
+// main, so that the routes package can import this one.
+func New() (*App, error) {
+	if err := config.LoadEnv(); err != nil {
+		return nil, fmt.Errorf("load environment: %w", err)
+	}
+	cfg := config.Load()
+
+	logger := rylog.New(rylog.Options{
+		Level:   cfg.Log.Level,
+		Format:  rylog.ParseFormat(cfg.Log.Format),
+		Source:  cfg.Log.Source,
+		NoColor: cfg.Log.NoColor,
+	})
+	// Make the configured logger the default too, so any library reaching for
+	// slog.Default lands in the same output stream.
+	slog.SetDefault(logger)
+
+	key, err := signingKey(cfg, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	gdb, err := rydb.Open(rydb.Config{
+		Driver:          cfg.DB.Driver,
+		DSN:             cfg.DB.DSN,
+		MaxOpenConns:    cfg.DB.MaxOpenConns,
+		MaxIdleConns:    cfg.DB.MaxIdleConns,
+		ConnMaxLifetime: cfg.DB.ConnMaxLifetime,
+		SlowThreshold:   cfg.DB.SlowThreshold,
+		LogQueries:      cfg.DB.LogQueries,
+	}, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	// Secure cookies are never sent over plain HTTP, so tying this to the URL
+	// scheme keeps local development working without weakening production.
+	jar := cookie.New(key, strings.HasPrefix(cfg.URL, "https://"))
+
+	// Redis is opened once and shared by whichever drivers asked for it. An
+	// application using none of them never connects, and never pays for a
+	// dependency it does not use.
+	var rdb *goredis.Client
+	if cfg.UsesRedis() {
+		rdb, err = ryredis.Open(context.Background(), ryredis.Config{
+			URL:      cfg.Redis.URL,
+			Addr:     cfg.Redis.Addr,
+			Username: cfg.Redis.Username,
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.DB,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	sessions := buildSessions(cfg, gdb, rdb, jar)
+
+	r := router.New()
+	// Order matters: RequestID first so every later logger has the id; Recover
+	// wraps the handler and still gets logged; CSRF last so it runs closest to
+	// the handler and its rejections are logged like any other response.
+	r.Use(middleware.RequestID)
+	r.Use(middleware.WithLogger(logger))
+	r.Use(middleware.Logger(logger))
+	r.Use(middleware.Recover(logger, cfg.Debug))
+	r.Use(session.Middleware(sessions, logger))
+	r.Use(csrf.Protect(csrf.Config{
+		Jar: jar,
+		// Requests authenticated by a bearer token rather than a cookie cannot
+		// be forged by a third-party page, because the browser does not attach
+		// the credential automatically.
+		Skip: func(req *http.Request) bool {
+			return strings.HasPrefix(req.URL.Path, "/api/")
+		},
+	}))
+
+	queueDriver := buildQueueDriver(cfg, gdb, rdb)
+	dispatcher := queue.NewDispatcher(queueDriver)
+
+	// The queued mailer hands messages to a worker; the underlying one does the
+	// delivering. Both are needed: the worker rebuilds the job from JSON and
+	// has no way to be given a mailer, so the job reaches for the registered
+	// one.
+	delivery := buildMailer(cfg, logger)
+	mail.RegisterJob(delivery)
+
+	mailer := delivery
+	if cfg.Mail.Queue {
+		mailer = mail.NewQueued(dispatcher)
+	}
+
+	return &App{
+		Config:  cfg,
+		Log:     logger,
+		DB:      gdb,
+		Router:  r,
+		Cookies: jar,
+		Flash:   flash.New(jar),
+		Session: sessions,
+		Queue:   dispatcher,
+		Mail:    mailer,
+		Signer:  auth.NewSigner(key),
+		Cache:   buildCache(cfg, gdb, rdb),
+		Redis:   rdb,
+
+		QueueDriver: queueDriver,
+
+		Scheduler: schedule.New(logger),
+	}, nil
+}
+
+// buildCache picks the cache store from configuration.
+func buildCache(cfg *config.Config, gdb *gorm.DB, rdb *goredis.Client) cache.Store {
+	switch cfg.Cache.Driver {
+	case "redis":
+		return cacheredis.New(rdb, cfg.Redis.Prefix+":cache")
+	case "db":
+		return cache.NewDB(gdb)
+	default:
+		return cache.NewMemory()
+	}
+}
+
+// buildSessions picks the session store from configuration.
+//
+// The cookie store is offered but is not the default: it keeps everything in
+// the browser, so a session cannot be revoked, and "log out everywhere" and
+// "log out on password change" both become impossible.
+func buildSessions(cfg *config.Config, gdb *gorm.DB, rdb *goredis.Client, jar *cookie.Jar) session.Store {
+	switch cfg.Session.Driver {
+	case "redis":
+		return sessionredis.New(rdb, jar, cfg.Session.Lifetime, cfg.Redis.Prefix+":session")
+	case "cookie":
+		return session.NewCookieStore(jar, cfg.Session.Lifetime)
+	default:
+		return session.NewDBStore(gdb, jar, cfg.Session.Lifetime)
+	}
+}
+
+// buildQueueDriver picks where background jobs are kept.
+func buildQueueDriver(cfg *config.Config, gdb *gorm.DB, rdb *goredis.Client) queue.Driver {
+	if cfg.Queue.Driver == "redis" {
+		return queueredis.New(rdb, cfg.Redis.Prefix+":queue")
+	}
+	return queue.NewDBDriver(gdb)
+}
+
+// buildMailer picks the delivery mechanism from configuration.
+func buildMailer(cfg *config.Config, logger *slog.Logger) mail.Mailer {
+	if cfg.Mail.Driver != "smtp" {
+		return mail.NewLog(logger)
+	}
+	return mail.NewSMTP(mail.SMTPConfig{
+		Host:       cfg.Mail.Host,
+		Port:       cfg.Mail.Port,
+		Username:   cfg.Mail.Username,
+		Password:   cfg.Mail.Password,
+		Encryption: mail.ParseEncryption(cfg.Mail.Encryption),
+	})
+}
+
+// From is the address messages are sent from.
+func (a *App) From() mail.Address {
+	return mail.Address{Name: a.Config.Mail.FromName, Email: a.Config.Mail.FromAddress}
+}
+
+// signingKey resolves APP_KEY, refusing to start without one in production.
+//
+// An empty key means every signature validates against an empty secret, so CSRF
+// tokens and flash messages could be forged by anyone. That is survivable while
+// developing and never survivable in production.
+func signingKey(cfg *config.Config, logger *slog.Logger) (string, error) {
+	if cfg.Key != "" {
+		return cfg.Key, nil
+	}
+	if cfg.IsProduction() {
+		return "", errors.New(
+			"APP_KEY is empty. Cookies could be forged by anyone, so the application " +
+				"will not start in production. Generate one with: ry key:generate")
+	}
+
+	logger.Warn("APP_KEY is empty; falling back to a published development key",
+		"fix", "ry key:generate")
+	return devKey, nil
+}
+
+// Close releases resources held by the application.
+func (a *App) Close() error {
+	if a.DB == nil {
+		return nil
+	}
+	return rydb.Close(a.DB)
+}

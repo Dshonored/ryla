@@ -1,0 +1,184 @@
+// Package config declares this application's settings.
+//
+// Everything is read explicitly rather than reflected out of struct tags, so
+// every setting, its environment variable and its default are visible in one
+// place and checked by the compiler.
+package config
+
+import (
+	"time"
+
+	ryconfig "github.com/Dshonored/ryla/config"
+
+	"ryla-site/database"
+)
+
+// Config is the whole application's configuration.
+type Config struct {
+	ryconfig.Core
+
+	DB      Database
+	Log     Log
+	Session Session
+	Mail    Mail
+	Cache   Cache
+	Redis   Redis
+	Queue   Queue
+}
+
+// Redis is optional. It is opened only when one of the drivers below asks for
+// it, so an application that does not use it never connects.
+type Redis struct {
+	URL      string
+	Addr     string
+	Username string
+	Password string
+	DB       int
+	Prefix   string
+}
+
+// Queue describes where background jobs are kept.
+type Queue struct {
+	// Driver is db or redis. The database driver ties a job's durability to the
+	// database transaction that queued it; Redis handles far more throughput
+	// but its durability is Redis's.
+	Driver string
+}
+
+// Cache describes where computed values are kept.
+type Cache struct {
+	// Driver is memory or db. Memory is per-process, so behind several
+	// instances each keeps its own copy and an invalidation on one is invisible
+	// to the others; db is shared and survives a restart.
+	Driver string
+	// TTL is the default lifetime for cached values.
+	TTL time.Duration
+}
+
+// Mail describes how email is sent.
+type Mail struct {
+	// Driver is smtp or log. The log driver prints instead of sending, which
+	// is what you want locally: a real send during development is at best a
+	// nuisance and at worst an email to a customer from a laptop.
+	Driver      string
+	Host        string
+	Port        int
+	Username    string
+	Password    string
+	Encryption  string
+	FromName    string
+	FromAddress string
+	// Queue sends through the job queue rather than inline, so a slow mail
+	// server never delays a response.
+	Queue bool
+}
+
+// Session describes how visitor state is stored.
+type Session struct {
+	// Driver is db, redis or cookie. Only cookie cannot be revoked, which is
+	// why it is not the default once anything signs in.
+	Driver   string
+	Lifetime time.Duration
+}
+
+// Database describes the SQL connection.
+type Database struct {
+	Driver          string
+	DSN             string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	SlowThreshold   time.Duration
+	LogQueries      bool
+}
+
+// Log describes logger output.
+type Log struct {
+	Level   string
+	Format  string
+	Source  bool
+	NoColor bool
+}
+
+// LoadEnv reads .env files into the process environment. Real environment
+// variables always win over file contents.
+func LoadEnv(paths ...string) error { return ryconfig.Load(paths...) }
+
+// Load builds the configuration from the environment.
+func Load() *Config {
+	env := ryconfig.String("APP_ENV", ryconfig.EnvLocal)
+
+	return &Config{
+		Core: ryconfig.Core{
+			Name:  ryconfig.String("APP_NAME", "ryla-site"),
+			Env:   env,
+			Debug: ryconfig.Bool("APP_DEBUG", env != ryconfig.EnvProduction),
+			URL:   ryconfig.String("APP_URL", "http://localhost:8080"),
+			Addr:  ryconfig.String("APP_ADDR", ":8080"),
+			Key:   ryconfig.String("APP_KEY", ""),
+		},
+		DB: Database{
+			Driver:          ryconfig.String("DB_DRIVER", database.Driver),
+			DSN:             ryconfig.String("DB_DSN", database.DefaultDSN),
+			MaxOpenConns:    ryconfig.Int("DB_MAX_OPEN_CONNS", 4),
+			MaxIdleConns:    ryconfig.Int("DB_MAX_IDLE_CONNS", 2),
+			ConnMaxLifetime: ryconfig.Duration("DB_CONN_MAX_LIFETIME", time.Hour),
+			SlowThreshold:   ryconfig.Duration("DB_SLOW_THRESHOLD", 200*time.Millisecond),
+			LogQueries:      ryconfig.Bool("DB_LOG_QUERIES", false),
+		},
+		Session: Session{
+			Driver:   ryconfig.String("SESSION_DRIVER", "db"),
+			Lifetime: ryconfig.Duration("SESSION_LIFETIME", 14*24*time.Hour),
+		},
+		Redis: Redis{
+			URL:      ryconfig.String("REDIS_URL", ""),
+			Addr:     ryconfig.String("REDIS_ADDR", "localhost:6379"),
+			Username: ryconfig.String("REDIS_USERNAME", ""),
+			Password: ryconfig.String("REDIS_PASSWORD", ""),
+			DB:       ryconfig.Int("REDIS_DB", 0),
+			Prefix:   ryconfig.String("REDIS_PREFIX", "ryla-site"),
+		},
+		Queue: Queue{
+			Driver: ryconfig.String("QUEUE_DRIVER", "db"),
+		},
+		Cache: Cache{
+			Driver: ryconfig.String("CACHE_DRIVER", "memory"),
+			TTL:    ryconfig.Duration("CACHE_TTL", time.Hour),
+		},
+		Mail: Mail{
+			Driver:      ryconfig.String("MAIL_DRIVER", defaultMailDriver(env)),
+			Host:        ryconfig.String("MAIL_HOST", "localhost"),
+			Port:        ryconfig.Int("MAIL_PORT", 1025),
+			Username:    ryconfig.String("MAIL_USERNAME", ""),
+			Password:    ryconfig.String("MAIL_PASSWORD", ""),
+			Encryption:  ryconfig.String("MAIL_ENCRYPTION", "starttls"),
+			FromName:    ryconfig.String("MAIL_FROM_NAME", ryconfig.String("APP_NAME", "ryla-site")),
+			FromAddress: ryconfig.String("MAIL_FROM_ADDRESS", "hello@example.com"),
+			Queue:       ryconfig.Bool("MAIL_QUEUE", true),
+		},
+		Log: Log{
+			// auto renders a compact coloured console when attached to a
+			// terminal and JSON otherwise, so local runs are readable and
+			// deployed ones stay parsable with no configuration either way.
+			Level:   ryconfig.String("LOG_LEVEL", "info"),
+			Format:  ryconfig.String("LOG_FORMAT", "auto"),
+			Source:  ryconfig.Bool("LOG_SOURCE", false),
+			NoColor: ryconfig.Bool("NO_COLOR", false),
+		},
+	}
+}
+
+// defaultMailDriver keeps development from sending real email by accident.
+func defaultMailDriver(env string) string {
+	if env == ryconfig.EnvProduction {
+		return "smtp"
+	}
+	return "log"
+}
+
+// UsesRedis reports whether any driver needs a Redis connection.
+func (c *Config) UsesRedis() bool {
+	return c.Cache.Driver == "redis" ||
+		c.Session.Driver == "redis" ||
+		c.Queue.Driver == "redis"
+}

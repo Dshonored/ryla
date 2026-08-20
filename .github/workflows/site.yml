@@ -1,0 +1,107 @@
+# Checks for the website.
+#
+# This does NOT deploy. The site runs on a Dokploy host that watches this
+# repository and builds site/Dockerfile itself, so a deploy step here would be a
+# second thing to keep in step with the first — and the one that goes stale is
+# always the one nobody is watching.
+#
+# What this does instead is fail the build before Dokploy ever sees the commit,
+# so a broken page is caught here rather than in a container that will not start.
+name: site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "install.sh"
+      - ".github/workflows/site.yml"
+      # The site renders the framework's own version and imports its packages,
+      # so a framework change can break the page with site/ untouched.
+      - "**/*.go"
+  pull_request:
+    paths:
+      - "site/**"
+      - "install.sh"
+      - "**/*.go"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: site/go.sum
+
+      # The site serves the repository's installer at /install.sh. Vendoring it
+      # here is what keeps the two the same file; the test below is what proves
+      # this step actually happened.
+      - name: Vendor the installer
+        run: cp install.sh site/resources/install.sh
+
+      # Generated views are not committed — the scaffold ignores *_templ.go and
+      # regenerates them on every build, so there is no stale-output check to
+      # make here. templ failing IS the check.
+      - name: Generate views
+        working-directory: site
+        run: go tool templ generate
+
+      - name: Vet
+        working-directory: site
+        run: go vet ./...
+
+      - name: Format
+        working-directory: site
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::Not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Test
+        working-directory: site
+        run: go test ./...
+
+      # Build the image the host will build, so a Dockerfile mistake fails here
+      # rather than halfway through a deploy.
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: site/Dockerfile
+          push: false
+          load: true
+          tags: ryla-site:ci
+
+      # The claim the page makes about itself, checked. If this image ever needs
+      # a base with a shell in it, that is a decision worth noticing.
+      - name: The image is just the binary
+        run: |
+          docker image inspect ryla-site:ci --format '{{.Size}}' \
+            | awk '{ printf "image: %.1f MB\n", $1/1024/1024 }'
+          layers=$(docker image inspect ryla-site:ci --format '{{len .RootFS.Layers}}')
+          echo "layers: $layers"
+
+      - name: It serves
+        run: |
+          docker run -d --name ryla-site-ci -p 8080:8080 ryla-site:ci
+          for i in $(seq 1 20); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8080/up; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS -o /dev/null -w 'GET /            %{http_code}\n' http://127.0.0.1:8080/
+          curl -fsS -o /dev/null -w 'GET /install.sh  %{http_code}\n' http://127.0.0.1:8080/install.sh
+          curl -fsS -o /dev/null -w 'GET /llms.txt    %{http_code}\n' http://127.0.0.1:8080/llms.txt
+          curl -fsS -o /dev/null -w 'GET /sitemap.xml %{http_code}\n' http://127.0.0.1:8080/sitemap.xml
+          # The one that would be embarrassing to get wrong: what people pipe
+          # into a shell has to be a shell script.
+          curl -fsS http://127.0.0.1:8080/install.sh | head -1 | grep -q '^#!/bin/sh'
+          docker rm -f ryla-site-ci
