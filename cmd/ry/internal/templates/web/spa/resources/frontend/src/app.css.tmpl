@@ -1,113 +1,243 @@
 /* ---------------------------------------------------------------------------
-   {{.Name}} — design system
+   {{.Name}} — Ryla design system
+
+   Dark-first, restrained and technical: near-black surfaces, a 12-step
+   monochrome ramp carrying most of the UI, one blue accent used sparingly,
+   sharp 2px corners, and monospace for every label, metric and identifier.
+   Depth reads through 1px borders stepping up the ramp, not through shadow.
+
+   :root IS the dark theme. Put data-theme="light" on <html> for light — there
+   is no prefers-color-scheme branch, because dark is the brand rather than a
+   preference.
 
    Tokens first, then base elements, then components. Everything below the
-   tokens is written against them, so changing the palette or the scale in one
-   place restyles the whole application.
+   tokens is written against them, so restyling the whole application means
+   editing the block at the top and nothing else.
 
    This ships with the welcome page. Keep it and build on it, or replace it
    wholesale — nothing in the framework depends on these class names.
 {{- if .Tailwind}}
 
-   Tailwind is imported at the top and the tokens are handed to it below, so
-   utilities and these classes can be mixed freely and agree on the palette.
-   Everything here is unlayered, which is why Tailwind's preflight — which
-   lives in @layer base — cannot override it.
+   Tailwind is imported at the top and the ramp is handed to it below, so
+   bg-gray-3 and var(--surface-card) are the same colour. Everything here is
+   unlayered, which is why Tailwind's preflight — which lives in @layer base —
+   cannot override it.
 {{- end}}
    --------------------------------------------------------------------------- */
+{{if .Tailwind}}
+@import "tailwindcss";
+{{end}}
+/* Geist and Geist Mono, the system's real typefaces. Delete this line and the
+   stacks below fall back to the platform UI and monospace fonts, which is the
+   whole reason they name a fallback. */
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap");
 
-{{if .Tailwind}}@import "tailwindcss";
-
-{{end}}/* --- Tokens -------------------------------------------------------------- */
+/* --- Tokens -------------------------------------------------------------- */
 
 :root {
-	color-scheme: light dark;
+	color-scheme: dark;
 
-	--bg: #fbfbfd;
-	--surface: #ffffff;
-	--surface-2: #f4f5f8;
-	--border: #e4e6ec;
+	/* Neutral ramp. 1 is the deepest background, 12 the brightest foreground;
+	   the steps between are surfaces, then borders, then text. Roughly ninety
+	   percent of this page is drawn from these twelve values alone. */
+	--gray-1: #0a0a0a;
+	--gray-2: #111111;
+	--gray-3: #171717;
+	--gray-4: #1f1f1f;
+	--gray-5: #2a2a2a;
+	--gray-6: #333333;
+	--gray-7: #3d3d3d;
+	--gray-8: #525252;
+	--gray-9: #737373;
+	--gray-10: #a3a3a3;
+	--gray-11: #cfcfcf;
+	--gray-12: #ededed;
 
-	--text: #14171c;
-	--text-muted: #5b6472;
-	--text-subtle: #8a93a2;
+	--black: #000000;
+	--white: #ffffff;
 
-	--accent: #2f6feb;
-	--accent-hover: #245bc7;
-	--accent-contrast: #ffffff;
-	--accent-subtle: #e8f0fe;
+	/* One accent. Blue means interactive or primary, and nothing else. */
+	--blue-fg: #52a8ff;
+	--blue: #0072f5;
+	--blue-hover: #3291ff;
+	--blue-active: #0761d1;
+	--blue-subtle: #0a1a2f;
 
-	--success: #1a7f43;
-	--danger: #c02b2b;
+	/* Semantic hues, reserved for status. */
+	--green: #45d97a;
+	--green-subtle: #0c2417;
+	--amber: #f5b942;
+	--amber-subtle: #2a1f06;
+	--red: #ff5c5c;
+	--red-subtle: #2c1113;
+	--purple: #a97bff;
 
-	--space-1: 0.25rem;
-	--space-2: 0.5rem;
-	--space-3: 0.75rem;
-	--space-4: 1rem;
-	--space-5: 1.5rem;
-	--space-6: 2rem;
-	--space-7: 3rem;
+	/* Aliases. Components reference these rather than the ramp, so the light
+	   theme below only has to restate twelve greys. */
+	--bg-app: var(--gray-1);
+	--bg-subtle: var(--gray-2);
+	--surface-card: var(--gray-3);
+	--surface-hover: var(--gray-4);
+	--surface-active: var(--gray-5);
 
-	--text-sm: 0.875rem;
-	--text-lg: 1.125rem;
-	--text-xl: 1.5rem;
-	--text-2xl: 2rem;
+	--border-subtle: var(--gray-6);
+	--border: var(--gray-7);
+	--border-strong: var(--gray-8);
+	--border-focus: var(--blue);
 
-	--radius-sm: 6px;
-	--radius: 10px;
-	--radius-lg: 16px;
+	--text-primary: var(--gray-12);
+	--text-secondary: var(--gray-10);
+	--text-muted: var(--gray-9);
+	--text-disabled: var(--gray-8);
+	--text-on-accent: var(--white);
+	--text-link: var(--blue-fg);
 
-	--font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-	--mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+	--accent: var(--blue);
+	--accent-hover: var(--blue-hover);
+	--accent-active: var(--blue-active);
+
+	--success: var(--green);
+	--warning: var(--amber);
+	--danger: var(--red);
+
+	--ring: 0 0 0 1px var(--blue), 0 0 0 4px color-mix(in srgb, var(--blue) 30%, transparent);
+
+	/* Type. Mono is not decoration here: every label, metric, path and
+	   identifier is set in it, and sans is reserved for prose and headings. */
+	--font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+	--font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+	--text-xs: 11px;
+	--text-sm: 13px;
+	--text-base: 14px;
+	--text-md: 16px;
+	--text-lg: 18px;
+	--text-xl: 22px;
+	--text-2xl: 28px;
+	--text-3xl: 36px;
+	--text-4xl: 48px;
+
+	--weight-normal: 400;
+	--weight-medium: 500;
+	--weight-semibold: 600;
+	--weight-bold: 700;
+
+	--leading-tight: 1.1;
+	--leading-snug: 1.3;
+	--leading-normal: 1.5;
+
+	--tracking-tight: -0.02em;
+	--tracking-wide: 0.02em;
+	--tracking-caps: 0.08em;
+
+	/* Space, on a 4px grid. */
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 20px;
+	--space-6: 24px;
+	--space-8: 32px;
+	--space-10: 40px;
+	--space-12: 48px;
+	--space-16: 64px;
+	--space-20: 80px;
+
+	--pad-control-x: 12px;
+	--pad-control-y: 8px;
+	--gutter: 24px;
+
+	/* Corners stay sharp. 2px everywhere, 4px on larger surfaces, and full
+	   only on pills. Nothing here is soft. */
+	--radius-sm: 2px;
+	--radius-md: 4px;
+	--radius-lg: 6px;
+	--radius-full: 999px;
+
+	/* Shadows exist for true overlays and are not used on this page: depth is
+	   drawn with borders. */
+	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+	--shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+	--shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+	--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+	--ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+	--dur-fast: 120ms;
+	--dur-base: 180ms;
 }
 
-@media (prefers-color-scheme: dark) {
-	:root {
-		--bg: #0e1117;
-		--surface: #161b22;
-		--surface-2: #1c222b;
-		--border: #272e38;
+/* The light theme restates the ramp and the blues. Everything else is an alias
+   and follows on its own. */
+[data-theme="light"] {
+	color-scheme: light;
 
-		--text: #e9edf3;
-		--text-muted: #a4aebc;
-		--text-subtle: #737d8c;
+	--gray-1: #ffffff;
+	--gray-2: #fafafa;
+	--gray-3: #f5f5f5;
+	--gray-4: #ededed;
+	--gray-5: #e3e3e3;
+	--gray-6: #e0e0e0;
+	--gray-7: #d4d4d4;
+	--gray-8: #a3a3a3;
+	--gray-9: #737373;
+	--gray-10: #525252;
+	--gray-11: #2a2a2a;
+	--gray-12: #171717;
 
-		--accent: #5b8cff;
-		--accent-hover: #7ba2ff;
-		--accent-contrast: #0e1117;
-		--accent-subtle: #16233d;
-	}
+	--blue-fg: #0060d1;
+	--blue-hover: #0060d1;
+	--blue-active: #004fa8;
+	--blue-subtle: #eaf2ff;
+
+	--green-subtle: #e6f6ec;
+	--amber-subtle: #fdf3dd;
+	--red-subtle: #fdeaea;
 }
 {{- if .Tailwind}}
 
 /* --- Tokens, as Tailwind utilities --------------------------------------- */
 
-/* Hands the palette above to Tailwind, so bg-surface, text-muted and
-   border-border mean the same thing as var(--surface) does below. The tokens
-   stay the single source of truth: `inline` makes each utility emit the
-   variable itself rather than a copy of its value, which is also why the dark
-   palette needs no Tailwind configuration at all — the variable it reads has
-   already changed by the time the utility is applied. */
-@theme inline {
-	--color-bg: var(--bg);
-	--color-surface: var(--surface);
-	--color-surface-2: var(--surface-2);
-	--color-border: var(--border);
+/* Hands the ramp and the accents to Tailwind, so bg-gray-3 and bg-card mean
+   what var(--surface-card) means. The tokens stay the single source of truth:
+   `inline` makes each utility emit the variable itself rather than a copy of
+   its value, which is also why the light theme needs no Tailwind configuration
+   at all — the variable a utility reads has already changed by the time the
+   utility applies.
 
-	--color-text: var(--text);
-	--color-muted: var(--text-muted);
-	--color-subtle: var(--text-subtle);
+   Type, radius and font tokens are deliberately absent. Their names — --text-*,
+   --radius-*, --font-* — are the same names Tailwind uses for those scales, so
+   declaring them in :root above already retunes text-sm, rounded-sm and
+   font-mono to the values in this file. Repeating them here would be circular. */
+@theme inline {
+	--color-gray-1: var(--gray-1);
+	--color-gray-2: var(--gray-2);
+	--color-gray-3: var(--gray-3);
+	--color-gray-4: var(--gray-4);
+	--color-gray-5: var(--gray-5);
+	--color-gray-6: var(--gray-6);
+	--color-gray-7: var(--gray-7);
+	--color-gray-8: var(--gray-8);
+	--color-gray-9: var(--gray-9);
+	--color-gray-10: var(--gray-10);
+	--color-gray-11: var(--gray-11);
+	--color-gray-12: var(--gray-12);
+
+	--color-app: var(--bg-app);
+	--color-card: var(--surface-card);
+	--color-hover: var(--surface-hover);
 
 	--color-accent: var(--accent);
 	--color-accent-hover: var(--accent-hover);
-	--color-accent-contrast: var(--accent-contrast);
-	--color-accent-subtle: var(--accent-subtle);
+	--color-accent-fg: var(--blue-fg);
+	--color-accent-subtle: var(--blue-subtle);
+
+	--color-fg: var(--text-primary);
+	--color-fg-secondary: var(--text-secondary);
+	--color-fg-muted: var(--text-muted);
 
 	--color-success: var(--success);
+	--color-warning: var(--warning);
 	--color-danger: var(--danger);
-
-	--font-sans: var(--font);
-	--font-mono: var(--mono);
 }
 {{- end}}
 
@@ -121,26 +251,29 @@
 
 body {
 	margin: 0;
-	background: var(--bg);
-	color: var(--text);
-	font-family: var(--font);
-	line-height: 1.6;
+	background: var(--bg-app);
+	color: var(--text-primary);
+	font-family: var(--font-sans);
+	font-size: var(--text-base);
+	line-height: var(--leading-normal);
 	-webkit-font-smoothing: antialiased;
 }
 
 h1,
 h2 {
 	margin: 0;
-	line-height: 1.25;
-	letter-spacing: -0.01em;
+	font-weight: var(--weight-semibold);
+	line-height: var(--leading-tight);
+	letter-spacing: var(--tracking-tight);
 }
 
 h1 {
-	font-size: var(--text-2xl);
+	font-size: var(--text-3xl);
 }
 
 h2 {
-	font-size: var(--text-lg);
+	font-size: var(--text-md);
+	line-height: var(--leading-snug);
 }
 
 p {
@@ -148,23 +281,30 @@ p {
 }
 
 code {
-	font-family: var(--mono);
-	font-size: 0.9em;
-	background: var(--surface-2);
+	font-family: var(--font-mono);
+	font-size: 0.92em;
+	color: var(--text-primary);
+	background: var(--bg-subtle);
+	border: 1px solid var(--border-subtle);
 	border-radius: var(--radius-sm);
-	padding: 0.15em 0.4em;
+	padding: 0.1em 0.35em;
 }
 
 a {
-	color: var(--accent);
+	color: var(--text-link);
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
 }
 
 /* --- Layout -------------------------------------------------------------- */
 
 .container {
-	max-width: 60rem;
+	max-width: 64rem;
 	margin: 0 auto;
-	padding: var(--space-7) var(--space-5);
+	padding: var(--space-16) var(--gutter);
 	display: flex;
 	flex-direction: column;
 	gap: var(--space-6);
@@ -180,155 +320,268 @@ a {
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: var(--space-3);
+	gap: var(--space-2);
 }
 
 .grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
-	gap: var(--space-4);
+	grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+	gap: var(--space-3);
 }
 
 /* --- Components ---------------------------------------------------------- */
 
+/* Border-first elevation: a flat fill and one hairline, no shadow. */
 .card {
-	background: var(--surface);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-lg);
+	background: var(--surface-card);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-sm);
 	padding: var(--space-5);
 	display: flex;
 	flex-direction: column;
 	gap: var(--space-4);
 }
 
+/* The mono uppercase eyebrow the system uses for every label and status. */
+.badge {
+	align-self: flex-start;
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	height: 20px;
+	padding: 0 var(--space-2);
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+	font-weight: var(--weight-medium);
+	letter-spacing: var(--tracking-caps);
+	text-transform: uppercase;
+	line-height: 1;
+	color: var(--blue-fg);
+	background: var(--blue-subtle);
+	border: 1px solid color-mix(in srgb, var(--blue) 40%, transparent);
+	border-radius: var(--radius-sm);
+	white-space: nowrap;
+}
+
 .muted {
-	color: var(--text-muted);
+	color: var(--text-secondary);
 }
 
 .subtle {
-	color: var(--text-subtle);
+	font-family: var(--font-mono);
 	font-size: var(--text-sm);
+	color: var(--text-muted);
 }
 
-.badge {
-	display: inline-block;
-	background: var(--accent-subtle);
-	color: var(--accent);
-	border-radius: 999px;
-	padding: 0 var(--space-3);
-	font-size: var(--text-sm);
-	font-weight: 600;
+/* A measurement, set the way the system sets every number: large sans, tight,
+   with the label above it in mono. */
+.counter {
+	font-size: var(--text-4xl);
+	font-weight: var(--weight-semibold);
+	letter-spacing: -0.03em;
+	line-height: var(--leading-tight);
+	font-variant-numeric: tabular-nums;
+	color: var(--text-primary);
 }
 
+/* Key/value pairs: mono uppercase keys, mono values. */
 .facts {
+	margin: 0;
 	display: grid;
 	grid-template-columns: auto 1fr;
 	gap: var(--space-2) var(--space-4);
+	font-family: var(--font-mono);
 	font-size: var(--text-sm);
-	margin: 0;
 }
 
 .facts dt {
 	color: var(--text-muted);
+	font-size: var(--text-xs);
+	letter-spacing: var(--tracking-caps);
+	text-transform: uppercase;
+	align-self: center;
 }
 
 .facts dd {
 	margin: 0;
-	font-family: var(--mono);
+	color: var(--text-secondary);
 }
 
-.counter {
-	font-size: var(--text-2xl);
-	font-variant-numeric: tabular-nums;
-	font-weight: 700;
-}
-
-button {
-	font: inherit;
-	font-weight: 600;
-	color: var(--accent-contrast);
-	background: var(--accent);
-	border: 1px solid transparent;
-	border-radius: var(--radius);
-	padding: var(--space-2) var(--space-4);
-	cursor: pointer;
-}
-
-button:hover:not(:disabled) {
-	background: var(--accent-hover);
-}
-
-button:disabled {
-	opacity: 0.6;
-	cursor: progress;
-}
-
-button.secondary {
-	color: var(--text);
-	background: var(--surface-2);
-	border-color: var(--border);
-}
-
-label {
-	display: flex;
-	flex-direction: column;
-	gap: var(--space-1);
+/* A path is case-sensitive data, not a label, so it keeps its own casing. The
+   uppercase treatment above is reserved for eyebrows and column headers. */
+.facts.paths dt {
 	font-size: var(--text-sm);
-	font-weight: 600;
-}
-
-input {
-	font: inherit;
-	font-weight: 400;
-	color: var(--text);
-	background: var(--surface);
-	border: 1px solid var(--border);
-	border-radius: var(--radius);
-	padding: var(--space-2) var(--space-3);
-}
-
-input:focus-visible,
-button:focus-visible {
-	outline: 2px solid var(--accent);
-	outline-offset: 2px;
-}
-
-.field-error {
-	color: var(--danger);
-	font-size: var(--text-sm);
-	font-weight: 400;
-}
-
-.notice {
-	border-radius: var(--radius);
-	padding: var(--space-3) var(--space-4);
-	font-size: var(--text-sm);
-	background: var(--surface-2);
-}
-
-.notice.success {
-	color: var(--success);
-}
-
-.notice.error {
-	color: var(--danger);
+	letter-spacing: normal;
+	text-transform: none;
+	color: var(--text-primary);
 }
 
 .endpoints {
 	width: 100%;
 	border-collapse: collapse;
+	font-family: var(--font-mono);
 	font-size: var(--text-sm);
-	font-family: var(--mono);
-}
-
-.endpoints th,
-.endpoints td {
-	text-align: left;
-	padding: var(--space-2) var(--space-3);
-	border-bottom: 1px solid var(--border);
 }
 
 .endpoints th {
+	text-align: left;
+	padding: 0 var(--space-3) var(--space-2) 0;
+	font-size: 10px;
+	font-weight: var(--weight-medium);
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	color: var(--gray-8);
+	border-bottom: 1px solid var(--border-subtle);
+}
+
+.endpoints td {
+	padding: var(--space-2) var(--space-3) var(--space-2) 0;
+	color: var(--text-secondary);
+	border-bottom: 1px solid var(--border-subtle);
+}
+
+.endpoints tr:last-child td {
+	border-bottom: none;
+}
+
+.endpoints td:first-child {
+	color: var(--text-primary);
+}
+
+/* The callout: a left rule in the tone's colour, never a fully coloured box. */
+.notice {
+	display: flex;
+	gap: var(--space-3);
+	padding: var(--space-3) 14px;
+	background: var(--bg-subtle);
+	border: 1px solid var(--border-subtle);
+	border-left: 2px solid var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-secondary);
+	font-size: var(--text-base);
+}
+
+.notice.error {
+	border-left-color: var(--danger);
+}
+
+.notice.success {
+	border-left-color: var(--success);
+}
+
+/* --- Controls ------------------------------------------------------------ */
+
+/* The primary button is the brightest step of the ramp on the darkest one —
+   the accent stays reserved for links and emphasis. */
+button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-2);
+	height: 34px;
+	padding: 0 14px;
+	font-family: var(--font-sans);
+	font-size: var(--text-base);
+	font-weight: var(--weight-medium);
+	line-height: 1;
+	letter-spacing: var(--tracking-tight);
+	color: var(--bg-app);
+	background: var(--text-primary);
+	border: 1px solid var(--text-primary);
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	white-space: nowrap;
+	user-select: none;
+	transition:
+		background var(--dur-fast) var(--ease-standard),
+		border-color var(--dur-fast),
+		opacity var(--dur-fast);
+}
+
+button:hover:not(:disabled) {
+	opacity: 0.85;
+}
+
+button:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+button.secondary {
+	color: var(--text-primary);
+	background: transparent;
+	border-color: var(--border);
+}
+
+button.secondary:hover:not(:disabled) {
+	opacity: 1;
+	border-color: var(--border-strong);
+}
+
+label {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+	font-weight: var(--weight-medium);
+	letter-spacing: var(--tracking-caps);
+	text-transform: uppercase;
 	color: var(--text-muted);
-	font-family: var(--font);
+}
+
+input {
+	height: 34px;
+	padding: 0 var(--pad-control-x);
+	font-family: var(--font-sans);
+	font-size: var(--text-base);
+	font-weight: var(--weight-normal);
+	letter-spacing: normal;
+	text-transform: none;
+	color: var(--text-primary);
+	background: var(--bg-subtle);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	transition:
+		border-color var(--dur-fast),
+		box-shadow var(--dur-fast);
+}
+
+input::placeholder {
+	color: var(--text-disabled);
+}
+
+input:focus {
+	outline: none;
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+input:focus-visible,
+button:focus-visible {
+	outline: none;
+	box-shadow: var(--ring);
+}
+
+/* Validation messages sit under their own input, in the tone that rejected it. */
+.field-error {
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+	letter-spacing: normal;
+	text-transform: none;
+	color: var(--danger);
+}
+
+@media (max-width: 40rem) {
+	.container {
+		padding: var(--space-10) var(--space-4);
+	}
+
+	h1 {
+		font-size: var(--text-2xl);
+	}
+
+	.counter {
+		font-size: var(--text-3xl);
+	}
 }

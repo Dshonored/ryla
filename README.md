@@ -122,9 +122,30 @@ Svelte, `tsc` otherwise — before Vite compiles, since Vite strips types withou
 looking at them.
 
 Either styling ships the same welcome page and the same design tokens.
-`tailwind` adds Tailwind v4 and hands it those tokens, so `bg-accent` and
-`var(--accent)` mean the same colour and the dark palette needs no Tailwind
+`tailwind` adds Tailwind v4 and hands it the neutral ramp, so `bg-gray-3` and
+`var(--surface-card)` mean the same colour and the light theme needs no Tailwind
 configuration at all. `plain` installs nothing extra.
+
+## The design system
+
+Generated pages ship the Ryla design system: dark-first, with a twelve-step
+monochrome ramp carrying most of the interface, one blue accent (`#0072f5`)
+reserved for interactive emphasis, sharp 2px corners, and Geist Mono on every
+label, metric and identifier. Depth reads through 1px borders stepping up the
+ramp rather than through shadow.
+
+`:root` **is** the dark theme. Put `data-theme="light"` on `<html>` for light —
+there is no `prefers-color-scheme` branch, because dark is the brand rather
+than a preference.
+
+It lives in one file — `resources/frontend/src/app.css` for the Vite modes,
+`resources/static/app.css` for `mvc` — with the tokens at the top and every
+rule below written against them, so restyling an application means editing that
+block and nothing else. Delete the file and nothing in the framework notices.
+
+Geist and Geist Mono load from Google Fonts. Remove the `@import` at the top of
+the stylesheet and the stacks fall back to the platform UI and monospace fonts,
+which is what their fallbacks are for.
 
 ## What a project looks like
 

@@ -36,9 +36,13 @@ treatment.
 ## Tailwind
 
 Tailwind v4 is installed and wired through the Vite plugin, and `src/app.css`
-hands it the design tokens: `bg-accent`, `text-muted` and `border-border` read
-the same variables the classes on the welcome page do, so the two can be mixed
-and the dark palette needs no Tailwind configuration.
+hands it the design system's neutral ramp: `bg-gray-3`, `text-fg-muted` and
+`border-gray-6` read the same variables the classes on the welcome page do, so
+the two can be mixed and the light theme needs no Tailwind configuration.
+
+The type and radius scales come across for free. Tailwind names those tokens
+`--text-*` and `--radius-*`, which is what the design system calls them too, so
+`text-sm` is 13px and `rounded-sm` is 2px without anything being configured.
 
 Nothing scans a config file for class names — v4 finds them itself — so there
 is no `tailwind.config.js` to keep in step.

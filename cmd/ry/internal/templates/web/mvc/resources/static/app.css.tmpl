@@ -1,97 +1,191 @@
 /* ---------------------------------------------------------------------------
-   {{.Name}} — design system
+   {{.Name}} — Ryla design system
+
+   Dark-first, restrained and technical: near-black surfaces, a 12-step
+   monochrome ramp carrying most of the UI, one blue accent used sparingly,
+   sharp 2px corners, and monospace for every label, metric and identifier.
+   Depth reads through 1px borders stepping up the ramp, not through shadow.
+
+   :root IS the dark theme. Put data-theme="light" on <html> for light — there
+   is no prefers-color-scheme branch, because dark is the brand rather than a
+   preference.
 
    Tokens first, then base elements, then components. Everything below the
-   tokens is written against them, so changing the palette or the scale in one
-   place restyles the whole application.
+   tokens is written against them, so restyling the whole application means
+   editing the block at the top and nothing else.
 
-   This ships with the welcome page. Keep it and build on it, or replace it
-   wholesale — nothing in the framework depends on these class names.
+   This ships with the welcome page and the auth screens. Keep it and build on
+   it, or replace it wholesale — nothing in the framework depends on these
+   class names.
    --------------------------------------------------------------------------- */
+
+/* Geist and Geist Mono, the system's real typefaces. Delete this line and the
+   stacks below fall back to the platform UI and monospace fonts, which is the
+   whole reason they name a fallback. */
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap");
 
 /* --- Tokens -------------------------------------------------------------- */
 
 :root {
-	color-scheme: light dark;
+	color-scheme: dark;
 
-	/* Surfaces, from furthest back to nearest front. */
-	--bg: #fbfbfd;
-	--surface: #ffffff;
-	--surface-2: #f4f5f8;
-	--border: #e4e6ec;
-	--border-strong: #d2d6de;
+	/* Neutral ramp. 1 is the deepest background, 12 the brightest foreground;
+	   the steps between are surfaces, then borders, then text. Roughly ninety
+	   percent of this page is drawn from these twelve values alone. */
+	--gray-1: #0a0a0a;
+	--gray-2: #111111;
+	--gray-3: #171717;
+	--gray-4: #1f1f1f;
+	--gray-5: #2a2a2a;
+	--gray-6: #333333;
+	--gray-7: #3d3d3d;
+	--gray-8: #525252;
+	--gray-9: #737373;
+	--gray-10: #a3a3a3;
+	--gray-11: #cfcfcf;
+	--gray-12: #ededed;
 
-	/* Text, from most to least prominent. */
-	--text: #14171c;
-	--text-muted: #5b6472;
-	--text-subtle: #8a93a2;
+	--black: #000000;
+	--white: #ffffff;
 
-	/* Accents. */
-	--accent: #2f6feb;
-	--accent-hover: #245bc7;
-	--accent-contrast: #ffffff;
-	--accent-subtle: #e8f0fe;
+	/* One accent. Blue means interactive or primary, and nothing else. */
+	--blue-fg: #52a8ff;
+	--blue: #0072f5;
+	--blue-hover: #3291ff;
+	--blue-active: #0761d1;
+	--blue-subtle: #0a1a2f;
 
-	--success: #1a7f43;
-	--warning: #9a6700;
-	--danger: #c02b2b;
+	/* Semantic hues, reserved for status. */
+	--green: #45d97a;
+	--green-subtle: #0c2417;
+	--amber: #f5b942;
+	--amber-subtle: #2a1f06;
+	--red: #ff5c5c;
+	--red-subtle: #2c1113;
+	--purple: #a97bff;
 
-	/* Spacing scale. */
-	--space-1: 0.25rem;
-	--space-2: 0.5rem;
-	--space-3: 0.75rem;
-	--space-4: 1rem;
-	--space-5: 1.5rem;
-	--space-6: 2rem;
-	--space-7: 3rem;
-	--space-8: 4rem;
+	/* Aliases. Components reference these rather than the ramp, so the light
+	   theme below only has to restate twelve greys. */
+	--bg-app: var(--gray-1);
+	--bg-subtle: var(--gray-2);
+	--surface-card: var(--gray-3);
+	--surface-hover: var(--gray-4);
+	--surface-active: var(--gray-5);
 
-	/* Type scale. */
-	--text-xs: 0.75rem;
-	--text-sm: 0.875rem;
-	--text-base: 1rem;
-	--text-lg: 1.125rem;
-	--text-xl: 1.5rem;
-	--text-2xl: 2rem;
-	--text-3xl: 2.75rem;
+	--border-subtle: var(--gray-6);
+	--border: var(--gray-7);
+	--border-strong: var(--gray-8);
+	--border-focus: var(--blue);
 
-	--radius-sm: 6px;
-	--radius: 10px;
-	--radius-lg: 16px;
+	--text-primary: var(--gray-12);
+	--text-secondary: var(--gray-10);
+	--text-muted: var(--gray-9);
+	--text-disabled: var(--gray-8);
+	--text-on-accent: var(--white);
+	--text-link: var(--blue-fg);
 
-	--shadow-sm: 0 1px 2px rgb(16 24 40 / 6%);
-	--shadow: 0 4px 16px rgb(16 24 40 / 8%);
+	--accent: var(--blue);
+	--accent-hover: var(--blue-hover);
+	--accent-active: var(--blue-active);
 
-	--font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-	--font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+	--success: var(--green);
+	--warning: var(--amber);
+	--danger: var(--red);
 
-	--content-width: 52rem;
+	--ring: 0 0 0 1px var(--blue), 0 0 0 4px color-mix(in srgb, var(--blue) 30%, transparent);
+
+	/* Type. Mono is not decoration here: every label, metric, path and
+	   identifier is set in it, and sans is reserved for prose and headings. */
+	--font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+	--font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+	--text-xs: 11px;
+	--text-sm: 13px;
+	--text-base: 14px;
+	--text-md: 16px;
+	--text-lg: 18px;
+	--text-xl: 22px;
+	--text-2xl: 28px;
+	--text-3xl: 36px;
+	--text-4xl: 48px;
+
+	--weight-normal: 400;
+	--weight-medium: 500;
+	--weight-semibold: 600;
+	--weight-bold: 700;
+
+	--leading-tight: 1.1;
+	--leading-snug: 1.3;
+	--leading-normal: 1.5;
+
+	--tracking-tight: -0.02em;
+	--tracking-wide: 0.02em;
+	--tracking-caps: 0.08em;
+
+	/* Space, on a 4px grid. */
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 20px;
+	--space-6: 24px;
+	--space-8: 32px;
+	--space-10: 40px;
+	--space-12: 48px;
+	--space-16: 64px;
+	--space-20: 80px;
+
+	--pad-control-x: 12px;
+	--pad-control-y: 8px;
+	--gutter: 24px;
+
+	/* Corners stay sharp. 2px everywhere, 4px on larger surfaces, and full
+	   only on pills. Nothing here is soft. */
+	--radius-sm: 2px;
+	--radius-md: 4px;
+	--radius-lg: 6px;
+	--radius-full: 999px;
+
+	/* Shadows exist for true overlays and are not used on these pages: depth is
+	   drawn with borders. */
+	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+	--shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+	--shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+
+	--ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+	--ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+	--dur-fast: 120ms;
+	--dur-base: 180ms;
+
+	--content-width: 64rem;
 }
 
-@media (prefers-color-scheme: dark) {
-	:root {
-		--bg: #0f1216;
-		--surface: #161a20;
-		--surface-2: #1c2128;
-		--border: #272d36;
-		--border-strong: #363d48;
+/* The light theme restates the ramp and the blues. Everything else is an alias
+   and follows on its own. */
+[data-theme="light"] {
+	color-scheme: light;
 
-		--text: #e8eaee;
-		--text-muted: #9aa4b2;
-		--text-subtle: #6f7987;
+	--gray-1: #ffffff;
+	--gray-2: #fafafa;
+	--gray-3: #f5f5f5;
+	--gray-4: #ededed;
+	--gray-5: #e3e3e3;
+	--gray-6: #e0e0e0;
+	--gray-7: #d4d4d4;
+	--gray-8: #a3a3a3;
+	--gray-9: #737373;
+	--gray-10: #525252;
+	--gray-11: #2a2a2a;
+	--gray-12: #171717;
 
-		--accent: #6ea0ff;
-		--accent-hover: #8ab4ff;
-		--accent-contrast: #0f1216;
-		--accent-subtle: #1a2436;
+	--blue-fg: #0060d1;
+	--blue-hover: #0060d1;
+	--blue-active: #004fa8;
+	--blue-subtle: #eaf2ff;
 
-		--success: #4ec57e;
-		--warning: #e0b341;
-		--danger: #f07171;
-
-		--shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
-		--shadow: 0 4px 16px rgb(0 0 0 / 45%);
-	}
+	--green-subtle: #e6f6ec;
+	--amber-subtle: #fdf3dd;
+	--red-subtle: #fdeaea;
 }
 
 /* --- Base ---------------------------------------------------------------- */
@@ -104,11 +198,11 @@
 
 body {
 	margin: 0;
-	background: var(--bg);
-	color: var(--text);
+	background: var(--bg-app);
+	color: var(--text-primary);
 	font-family: var(--font-sans);
 	font-size: var(--text-base);
-	line-height: 1.6;
+	line-height: var(--leading-normal);
 	-webkit-font-smoothing: antialiased;
 }
 
@@ -116,37 +210,46 @@ h1,
 h2,
 h3 {
 	margin: 0;
-	line-height: 1.25;
-	letter-spacing: -0.02em;
-	font-weight: 650;
+	font-weight: var(--weight-semibold);
+	line-height: var(--leading-tight);
+	letter-spacing: var(--tracking-tight);
 }
 
 h1 { font-size: var(--text-3xl); }
-h2 { font-size: var(--text-xl); }
-h3 { font-size: var(--text-lg); }
+
+h2 {
+	font-size: var(--text-md);
+	line-height: var(--leading-snug);
+}
+
+h3 {
+	font-size: var(--text-base);
+	line-height: var(--leading-snug);
+}
 
 p { margin: 0; }
 
 a {
-	color: var(--accent);
+	color: var(--text-link);
 	text-decoration: none;
 }
 
 a:hover { text-decoration: underline; }
 
 code {
-	padding: 0.15em 0.4em;
+	padding: 0.1em 0.35em;
+	border: 1px solid var(--border-subtle);
 	border-radius: var(--radius-sm);
-	background: var(--surface-2);
-	color: var(--text);
+	background: var(--bg-subtle);
+	color: var(--text-primary);
 	font-family: var(--font-mono);
-	font-size: 0.875em;
+	font-size: 0.92em;
 }
 
-/* Visible focus for anyone navigating by keyboard. */
+/* A blue ring, always visible for anyone navigating by keyboard. */
 :focus-visible {
-	outline: 2px solid var(--accent);
-	outline-offset: 2px;
+	outline: none;
+	box-shadow: var(--ring);
 	border-radius: var(--radius-sm);
 }
 
@@ -155,57 +258,81 @@ code {
 .container {
 	max-width: var(--content-width);
 	margin: 0 auto;
-	padding: var(--space-8) var(--space-5);
+	padding: var(--space-16) var(--gutter);
 }
 
-.stack > * + * { margin-top: var(--space-5); }
+.stack > * + * { margin-top: var(--space-6); }
 .stack-sm > * + * { margin-top: var(--space-2); }
 
 .grid {
 	display: grid;
-	gap: var(--space-4);
+	gap: var(--space-3);
 	grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
 }
 
 /* --- Components ---------------------------------------------------------- */
 
+/* Border-first elevation: a flat fill and one hairline, no shadow. */
 .card {
 	padding: var(--space-5);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-lg);
-	background: var(--surface);
-	box-shadow: var(--shadow-sm);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-sm);
+	background: var(--surface-card);
 }
 
+/* The mono uppercase eyebrow the system uses for every label and status. */
 .badge {
-	display: inline-block;
-	padding: 0.2em 0.6em;
-	border-radius: 999px;
-	background: var(--accent-subtle);
-	color: var(--accent);
+	display: inline-flex;
+	align-items: center;
+	height: 20px;
+	padding: 0 var(--space-2);
+	border: 1px solid color-mix(in srgb, var(--blue) 40%, transparent);
+	border-radius: var(--radius-sm);
+	background: var(--blue-subtle);
+	color: var(--blue-fg);
+	font-family: var(--font-mono);
 	font-size: var(--text-xs);
-	font-weight: 600;
-	letter-spacing: 0.02em;
+	font-weight: var(--weight-medium);
+	letter-spacing: var(--tracking-caps);
+	text-transform: uppercase;
+	line-height: 1;
+	white-space: nowrap;
 }
 
-.muted { color: var(--text-muted); }
-.subtle { color: var(--text-subtle); }
+.muted { color: var(--text-secondary); }
+
+.subtle {
+	color: var(--text-muted);
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+}
+
 .small { font-size: var(--text-sm); }
 
+/* The primary button is the brightest step of the ramp on the darkest one —
+   the accent stays reserved for links and emphasis. */
 .btn {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	gap: var(--space-2);
-	padding: var(--space-3) var(--space-5);
-	border: 1px solid transparent;
-	border-radius: var(--radius);
-	background: var(--accent);
-	color: var(--accent-contrast);
-	font: inherit;
-	font-weight: 600;
+	height: 34px;
+	padding: 0 14px;
+	border: 1px solid var(--text-primary);
+	border-radius: var(--radius-sm);
+	background: var(--text-primary);
+	color: var(--bg-app);
+	font-family: var(--font-sans);
+	font-size: var(--text-base);
+	font-weight: var(--weight-medium);
+	line-height: 1;
+	letter-spacing: var(--tracking-tight);
 	cursor: pointer;
-	transition: background 120ms ease, transform 120ms ease;
+	white-space: nowrap;
+	transition:
+		background var(--dur-fast) var(--ease-standard),
+		border-color var(--dur-fast),
+		opacity var(--dur-fast);
 
 	/* Without this, clicking a button repeatedly selects the surrounding text
 	   instead of just clicking. */
@@ -214,47 +341,48 @@ code {
 }
 
 .btn:hover {
-	background: var(--accent-hover);
+	opacity: 0.85;
 	text-decoration: none;
 }
 
-.btn:active { transform: translateY(1px); }
-
 .btn[disabled] {
-	opacity: 0.6;
+	opacity: 0.5;
 	cursor: not-allowed;
 }
 
 .btn-quiet {
-	background: var(--surface-2);
+	background: transparent;
 	border-color: var(--border);
-	color: var(--text);
+	color: var(--text-primary);
 }
 
 .btn-quiet:hover {
-	background: var(--surface-2);
+	opacity: 1;
 	border-color: var(--border-strong);
 }
 
-/* Key/value tiles used for the environment summary. */
+/* Key/value tiles used for the environment summary: a mono uppercase label
+   over the value, which is how the system presents every measurement. */
 .stat {
-	padding: var(--space-4);
-	border: 1px solid var(--border);
-	border-radius: var(--radius);
-	background: var(--surface);
+	padding: var(--space-4) var(--space-5);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-sm);
+	background: var(--surface-card);
 }
 
 .stat dt {
 	margin: 0;
-	color: var(--text-subtle);
+	color: var(--text-muted);
+	font-family: var(--font-mono);
 	font-size: var(--text-xs);
-	font-weight: 600;
+	font-weight: var(--weight-medium);
 	text-transform: uppercase;
-	letter-spacing: 0.06em;
+	letter-spacing: var(--tracking-caps);
 }
 
 .stat dd {
-	margin: var(--space-1) 0 0;
+	margin: var(--space-2) 0 0;
+	color: var(--text-secondary);
 	font-family: var(--font-mono);
 	font-size: var(--text-sm);
 	word-break: break-word;
@@ -270,27 +398,28 @@ code {
 
 .counter-value {
 	min-width: 4ch;
-	font-family: var(--font-mono);
-	font-size: var(--text-3xl);
-	font-weight: 650;
+	color: var(--text-primary);
+	font-size: var(--text-4xl);
+	font-weight: var(--weight-semibold);
+	letter-spacing: -0.03em;
 	/* tabular-nums keeps the digits a fixed width, so the value does not shift
 	   the buttons sideways as it grows. */
 	font-variant-numeric: tabular-nums;
-	line-height: 1;
+	line-height: var(--leading-tight);
 	user-select: none;
 	-webkit-user-select: none;
 }
 
-/* A brief flash when the value changes, so a round trip is visible. */
+/* A brief flash when the value changes, so a round trip is visible. Fast and
+   small: the system allows fades and slight pops, never a bounce. */
 .counter-value.bumped {
-	animation: bump 320ms ease;
+	animation: axon-pop var(--dur-base) var(--ease-out);
 	color: var(--accent);
 }
 
-@keyframes bump {
-	0% { transform: scale(1); }
-	40% { transform: scale(1.18); }
-	100% { transform: scale(1); }
+@keyframes axon-pop {
+	from { opacity: 0; transform: translateY(4px) scale(0.98); }
+	to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -298,7 +427,8 @@ code {
 	.btn { transition: none; }
 }
 
-/* File list with an instruction beside each path. */
+/* File list with an instruction beside each path. Rows separate on a hairline,
+   the way every list in the system does. */
 .files {
 	margin: 0;
 	padding: 0;
@@ -310,14 +440,13 @@ code {
 	gap: var(--space-4);
 	flex-wrap: wrap;
 	padding: var(--space-3) 0;
-	border-top: 1px solid var(--border);
+	border-top: 1px solid var(--border-subtle);
 }
 
 .files li:first-child { border-top: 0; }
 
 .files code {
 	flex: 0 0 auto;
-	background: var(--surface-2);
 }
 
 .files span {
@@ -326,41 +455,50 @@ code {
 }
 
 .footer {
-	margin-top: var(--space-7);
+	margin-top: var(--space-12);
 	padding-top: var(--space-5);
-	border-top: 1px solid var(--border);
-	color: var(--text-subtle);
+	border-top: 1px solid var(--border-subtle);
+	color: var(--text-muted);
+	font-family: var(--font-mono);
 	font-size: var(--text-sm);
-}
-
-@media (max-width: 34rem) {
-	:root { --text-3xl: 2rem; }
-	.container { padding: var(--space-6) var(--space-4); }
 }
 
 /* --- Forms and flash messages -------------------------------------------- */
 
 .field label {
 	display: block;
-	margin-bottom: var(--space-1);
-	font-size: var(--text-sm);
-	font-weight: 600;
+	margin-bottom: var(--space-2);
+	color: var(--text-muted);
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
+	font-weight: var(--weight-medium);
+	text-transform: uppercase;
+	letter-spacing: var(--tracking-caps);
 }
 
 .field input {
 	width: 100%;
-	padding: var(--space-3);
-	border: 1px solid var(--border-strong);
-	border-radius: var(--radius);
-	background: var(--surface);
-	color: var(--text);
-	font: inherit;
+	height: 34px;
+	padding: 0 var(--pad-control-x);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-subtle);
+	color: var(--text-primary);
+	font-family: var(--font-sans);
+	font-size: var(--text-base);
+	transition:
+		border-color var(--dur-fast),
+		box-shadow var(--dur-fast);
 }
 
-.field input:focus-visible {
+.field input::placeholder {
+	color: var(--text-disabled);
+}
+
+.field input:focus {
+	outline: none;
 	border-color: var(--accent);
-	outline: 2px solid var(--accent);
-	outline-offset: 1px;
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 /* Driven by aria-invalid rather than a class, so the visual state and the
@@ -370,18 +508,21 @@ code {
 }
 
 .field-error {
-	margin-top: var(--space-1);
+	margin-top: var(--space-2);
 	color: var(--danger);
-	font-size: var(--text-sm);
+	font-family: var(--font-mono);
+	font-size: var(--text-xs);
 }
 
+/* The callout: a left rule in the tone's colour, never a fully coloured box. */
 .flash {
-	padding: var(--space-3) var(--space-4);
-	border: 1px solid var(--border);
-	border-left-width: 3px;
-	border-radius: var(--radius);
-	background: var(--surface);
-	font-size: var(--text-sm);
+	padding: var(--space-3) 14px;
+	border: 1px solid var(--border-subtle);
+	border-left: 2px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-subtle);
+	color: var(--text-secondary);
+	font-size: var(--text-base);
 }
 
 .flash-success { border-left-color: var(--success); }
@@ -389,8 +530,28 @@ code {
 .flash-warning { border-left-color: var(--warning); }
 .flash-error   { border-left-color: var(--danger); }
 
-/* Sign-in and sign-up pages: a single narrow column. */
+/* Sign-in and sign-up pages: a single narrow column on a card.
+
+   The radial wash behind it is the one decorative flourish the system permits.
+   Everywhere else the background is flat near-black — no gradients, no
+   texture, no illustration — so this stays rare enough to read as deliberate. */
 .auth-card {
 	max-width: 24rem;
 	margin: 0 auto;
+	padding: var(--space-6);
+	border: 1px solid var(--border-subtle);
+	border-radius: var(--radius-sm);
+	background: var(--surface-card);
+}
+
+body:has(.auth-card) {
+	background-image: radial-gradient(circle at 50% 0%, var(--gray-3) 0%, var(--bg-app) 60%);
+	background-repeat: no-repeat;
+	background-attachment: fixed;
+}
+
+@media (max-width: 40rem) {
+	.container { padding: var(--space-10) var(--space-4); }
+	h1 { font-size: var(--text-2xl); }
+	.counter-value { font-size: var(--text-3xl); }
 }
