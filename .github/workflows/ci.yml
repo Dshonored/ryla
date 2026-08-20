@@ -29,9 +29,21 @@ jobs:
       - name: Check formatting
         shell: bash
         run: |
-          unformatted=$(gofmt -l .)
+          # gofmt walks the filesystem and knows nothing about modules, so a
+          # bare `gofmt -l .` also lints every nested module — which is how a
+          # formatting slip on the website came to fail the framework's build.
+          # `go vet` and `go test` are unaffected: ./... already stops at a
+          # module boundary. Only this step had to be taught where the edges
+          # are, and it is done by path so a second nested module needs no
+          # change here.
+          files=$(git ls-files '*.go')
+          for m in $(git ls-files '*/go.mod' | sed 's#/go.mod$##'); do
+            files=$(echo "$files" | grep -v "^$m/" || true)
+          done
+
+          unformatted=$(echo "$files" | xargs gofmt -l)
           if [ -n "$unformatted" ]; then
-            echo "These files are not gofmt-clean:"
+            echo "::error::These files are not gofmt-clean:"
             echo "$unformatted"
             exit 1
           fi

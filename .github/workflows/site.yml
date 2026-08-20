@@ -88,6 +88,13 @@ jobs:
           push: false
           load: true
           tags: ryla-site:ci
+          # Reuse the previous run's layers. Most pushes change a template or a
+          # stylesheet, so the module download and the dependency compile are
+          # already done — which makes this quick and, more usefully, means the
+          # step that reaches out to the module proxy usually does not run at
+          # all.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # The claim the page makes about itself, checked. If this image ever needs
       # a base with a shell in it, that is a decision worth noticing.

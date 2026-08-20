@@ -19,9 +19,20 @@ WORKDIR /src
 
 # Dependencies first, so editing a page does not re-download the module graph.
 COPY go.mod go.sum ./
+
+# Retried, because this is the one step that depends on a service outside the
+# build. proxy.golang.org drops a connection often enough to have already
+# failed a run, and a network blip is not a reason to refuse to ship a page
+# whose content has not changed. Three attempts, then a real failure — a step
+# that retried forever would turn an outage into a hung build.
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go mod download
+    n=0; until go mod download; do \
+      n=$((n+1)); \
+      if [ "$n" -ge 3 ]; then echo "module download failed after $n attempts"; exit 1; fi; \
+      echo "module download failed, retrying ($n/3)..."; \
+      sleep 5; \
+    done
 
 COPY . .
 
