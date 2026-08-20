@@ -1,0 +1,32 @@
+# Development database for {{.Name}}.
+#
+# The credentials match the DSN in .env, so this works with no further
+# configuration:
+#
+#   docker compose up -d
+#   ry migrate
+#
+# This is for local development only: it allows an empty root password and
+# publishes the port on your machine. Do not point production at it.
+
+services:
+  mysql:
+    image: mysql:8
+    restart: unless-stopped
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: {{.Name}}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # MySQL accepts connections briefly during start-up and then restarts,
+      # so waiting for the port alone is not enough to know it is ready.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql-data:

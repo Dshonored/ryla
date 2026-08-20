@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -28,6 +29,8 @@ func newCmd() *cobra.Command {
 		noPrompt  bool
 		skipDeps  bool
 		framework string
+		dbSetupIn string
+		dbURL     string
 	)
 
 	cmd := &cobra.Command{
@@ -46,7 +49,8 @@ explicitly to skip the prompts, which is what you want in scripts and CI.
 				name = args[0]
 			}
 
-			a := answers{Name: name, Module: module, DB: database, Web: web}
+			a := answers{Name: name, Module: module, DB: database, Web: web,
+				Setup: dbSetup{Mode: dbSetupIn, URL: dbURL}}
 			if noPrompt || !interactive() {
 				a.applyDefaults()
 			} else if err := a.prompt(); err != nil {
@@ -64,6 +68,8 @@ explicitly to skip the prompts, which is what you want in scripts and CI.
 	f.BoolVarP(&noPrompt, "yes", "y", false, "accept defaults instead of prompting")
 	f.BoolVar(&skipDeps, "skip-deps", false, "do not resolve dependencies or generate view code")
 	f.StringVar(&framework, "framework", "", "path to a local Ryla checkout to build against instead of the published module")
+	f.StringVar(&dbSetupIn, "db-setup", "", "for a server database: docker, external or skip")
+	f.StringVar(&dbURL, "db-url", "", "connection string for an existing database; implies --db-setup=external")
 
 	return cmd
 }
@@ -74,6 +80,7 @@ type answers struct {
 	Module string
 	DB     string
 	Web    string
+	Setup  dbSetup
 }
 
 func (a *answers) applyDefaults() {
@@ -88,6 +95,15 @@ func (a *answers) applyDefaults() {
 	}
 	if a.Web == "" {
 		a.Web = "mvc"
+	}
+	if a.Setup.URL != "" {
+		a.Setup.Mode = SetupExternal
+	}
+	if a.Setup.Mode == "" {
+		// A compose file is a single ignored file on a machine without Docker
+		// and the whole answer on one with it, so it is the better default for
+		// an unattended run than leaving the project pointed at nothing.
+		a.Setup.Mode = SetupDocker
 	}
 }
 
@@ -134,6 +150,18 @@ func (a *answers) prompt() error {
 		if err := runForm(huh.NewForm(groups...)); err != nil {
 			return err
 		}
+	}
+
+	if a.Setup.Mode == "" && a.Setup.URL == "" {
+		db, err := scaffold.LookupDatabase(a.DB)
+		if err != nil {
+			return err
+		}
+		setup, err := askDBSetup(db, naming.Kebab(a.Name))
+		if err != nil {
+			return err
+		}
+		a.Setup = setup
 	}
 
 	if a.Module == "" {
@@ -220,12 +248,29 @@ func runNew(ctx context.Context, out io.Writer, a answers, skipDeps bool, framew
 	}
 	fmt.Fprintf(out, "Created %s (%d files)\n", relativeToWD(dest), len(files))
 
+	db, err := scaffold.LookupDatabase(a.DB)
+	if err != nil {
+		return err
+	}
+
+	switch a.Setup.Mode {
+	case SetupDocker:
+		if err := writeCompose(naming.Kebab(a.Name), db, dest, out); err != nil {
+			return err
+		}
+	case SetupExternal:
+		if err := setEnvDSN(dest, db, a.Setup.URL); err != nil {
+			return err
+		}
+	}
+
 	if err := wireModule(ctx, dest, local, frameworkVersion); err != nil {
 		return err
 	}
 
 	if skipDeps {
 		fmt.Fprintln(out, "\nSkipped dependency resolution. Run `go mod tidy` before building.")
+		dbNextSteps(out, db, a.Setup, proj.Name)
 		printNextSteps(out, proj.Name, dest)
 		return nil
 	}
@@ -250,8 +295,34 @@ func runNew(ctx context.Context, out io.Writer, a answers, skipDeps bool, framew
 		return err
 	}
 
+	dbNextSteps(out, db, a.Setup, proj.Name)
 	printNextSteps(out, proj.Name, dest)
 	return nil
+}
+
+// setEnvDSN points the generated .env at a database that already exists.
+//
+// Only .env is rewritten, never .env.example: the example is committed, and a
+// real connection string with real credentials has no business in a repository.
+func setEnvDSN(dest string, db scaffold.Database, url string) error {
+	key := "DB_DSN"
+	if db.Name == "mongo" {
+		key = "MONGO_URI"
+	}
+
+	path := filepath.Join(dest, ".env")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read .env: %w", err)
+	}
+
+	pattern := regexp.MustCompile(`(?m)^\s*` + key + `\s*=.*$`)
+	if !pattern.Match(raw) {
+		return fmt.Errorf(".env has no %s line to replace", key)
+	}
+
+	updated := pattern.ReplaceAllLiteralString(string(raw), key+"="+url)
+	return os.WriteFile(path, []byte(updated), 0o644)
 }
 
 // wireModule points the new project's go.mod at the framework: at a published

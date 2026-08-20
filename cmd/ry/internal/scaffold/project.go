@@ -28,6 +28,17 @@ type Database struct {
 	// rather than pretending the option does not exist.
 	Available bool
 	Summary   string
+
+	// Server marks a database that runs as a separate process. SQLite is a
+	// file and needs nothing; the rest need something listening before the
+	// first migration, which is worth settling at `ry new` rather than
+	// discovering as a connection refused.
+	Server bool
+	// ComposeImage and ComposePort describe the container `ry new` can write a
+	// compose file for. The credentials in that file are chosen to match
+	// DefaultDSN, so the generated .env works against it untouched.
+	ComposeImage string
+	ComposePort  int
 }
 
 // WebMode describes one supported frontend style.
@@ -45,6 +56,17 @@ type WebMode struct {
 	UsesVite  bool
 	Available bool
 	Summary   string
+
+	// Server marks a database that runs as a separate process. SQLite is a
+	// file and needs nothing; the rest need something listening before the
+	// first migration, which is worth settling at `ry new` rather than
+	// discovering as a connection refused.
+	Server bool
+	// ComposeImage and ComposePort describe the container `ry new` can write a
+	// compose file for. The credentials in that file are chosen to match
+	// DefaultDSN, so the generated .env works against it untouched.
+	ComposeImage string
+	ComposePort  int
 }
 
 var databases = []Database{
@@ -67,6 +89,9 @@ var databases = []Database{
 		MaxOpenConns: 100,
 		Available:    true,
 		Summary:      "Documents rather than rows. No GORM and no migrations: indexes are declared in code.",
+		Server:       true,
+		ComposeImage: "mongo:7",
+		ComposePort:  27017,
 	},
 	{
 		Name:    "postgres",
@@ -83,6 +108,9 @@ var databases = []Database{
 		// and a psql session alongside the web process.
 		MaxOpenConns: 25,
 		Available:    true,
+		Server:       true,
+		ComposeImage: "postgres:17",
+		ComposePort:  5432,
 		Summary:      "A real server, and transactional DDL: a failed migration leaves nothing half-built.",
 	},
 	{
@@ -97,6 +125,9 @@ var databases = []Database{
 		// so this is, if anything, conservative.
 		MaxOpenConns: 25,
 		Available:    true,
+		Server:       true,
+		ComposeImage: "mysql:8",
+		ComposePort:  3306,
 		Summary:      "MariaDB too. DDL commits implicitly, so a failed migration is not rolled back.",
 	},
 }
