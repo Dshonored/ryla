@@ -196,3 +196,50 @@ func TestFieldRendersHiddenInput(t *testing.T) {
 		t.Errorf("Field() = %q", field)
 	}
 }
+
+// TestPostWithTheCookieValueIsAccepted covers what a fetch() can actually do.
+//
+// document.cookie hands a script the signed cookie, not the token inside it, so
+// a browser client echoing the cookie back is sending a different string from
+// the one a server-rendered form submits. Both have to be accepted, or the
+// cookie being readable buys nothing.
+func TestPostWithTheCookieValueIsAccepted(t *testing.T) {
+	_, c := issue(t, nil)
+	h := protected(Config{})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.AddCookie(c)
+	req.Header.Set(HeaderName, c.Value)
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("echoing the cookie was rejected with %d", rec.Code)
+	}
+}
+
+// TestPlantedCookieEchoedBackIsRejected is the reason the cookie's signature is
+// checked before its value is accepted from a header.
+//
+// Someone able to write a cookie on a sibling subdomain knows the value they
+// wrote. If the header were compared against whatever arrived in the cookie,
+// that value would match itself and the check would pass for a request the
+// attacker composed. It matches only after the signature proves this server
+// issued it.
+func TestPlantedCookieEchoedBackIsRejected(t *testing.T) {
+	h := protected(Config{})
+
+	planted := "cGxhbnRlZA.not-a-real-signature"
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.AddCookie(&http.Cookie{Name: CookieName, Value: planted})
+	req.Header.Set(HeaderName, planted)
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("a planted cookie echoed back got %d, want 403", rec.Code)
+	}
+}

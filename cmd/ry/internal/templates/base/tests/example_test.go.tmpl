@@ -11,9 +11,12 @@
 package tests
 
 import (
+	"net/http"
 	"sync"
 	"testing"
 
+	"{{.RylaModule}}/csrf"
+	"{{.RylaModule}}/session"
 	rytest "{{.RylaModule}}/testing"
 
 	"{{.Module}}/app"
@@ -104,5 +107,55 @@ func TestTheHealthEndpointReportsOK(t *testing.T) {
 
 	if body.Status != "ok" {
 		t.Errorf("status = %q, want ok", body.Status)
+	}
+}
+
+// TestCSRFProtectsCookieAuthenticatedRequests pins the rule the middleware in
+// app.go applies, because it is the kind of thing that is silently wrong: a
+// weakened check breaks no build and fails no other test, and the first sign of
+// it is somebody else's site acting on behalf of your signed-in users.
+//
+// What decides it is the credential, not the path. A request arriving with the
+// session cookie is checked wherever it is addressed — /api included, which is
+// where `ry make:auth` puts a signed-in session.
+func TestCSRFProtectsCookieAuthenticatedRequests(t *testing.T) {
+	// Signed in, because that is the state worth protecting — and because the
+	// session store writes no cookie until a session holds something, so an
+	// anonymous visitor has nothing to forge with and is not challenged.
+	c := client(t).LoginID(1)
+
+	if c.Cookie(session.CookieName) == nil {
+		t.Fatal("no session cookie was issued, so this test would prove nothing")
+	}
+
+	// A token is set explicitly, and a wrong one on purpose: the test client
+	// attaches the real token when the header is empty, which is the very
+	// behaviour being checked here.
+	req := c.Request(http.MethodPost, "/api/not-a-route", nil)
+	req.Header.Set(csrf.HeaderName, "not-the-token")
+
+	c.Do(req).AssertStatus(http.StatusForbidden)
+}
+
+// TestCSRFLeavesCredentiallessRequestsAlone is the other half of that rule, and
+// the reason it is written in terms of the cookie rather than the path.
+//
+// A caller that sends no cookie has nothing another site could have caused to be
+// attached, so there is no forgery to prevent and nothing to prove. Challenging
+// it would break every API client that is not a browser — curl, a mobile app, a
+// server-to-server call — for no gain.
+func TestCSRFLeavesCredentiallessRequestsAlone(t *testing.T) {
+	// A client that has made no request yet, so it holds no cookies.
+	c := client(t)
+
+	req := c.Request(http.MethodPost, "/api/not-a-route", nil)
+	// Set so the client does not helpfully fetch a real token, which would
+	// bring the CSRF cookie with it and make this a different test.
+	req.Header.Set(csrf.HeaderName, "not-the-token")
+
+	// The route does not exist; what matters is that it was not refused before
+	// anything got the chance to say so.
+	if got := c.Do(req).Status(); got == http.StatusForbidden {
+		t.Errorf("a request with no cookies was challenged for CSRF (%d)", got)
 	}
 }

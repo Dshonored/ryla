@@ -16,8 +16,7 @@ import (
 )
 
 // APIPrefix is where everything this server answers itself lives. It is a
-// constant because two decisions depend on it: the CSRF middleware skips it,
-// and anything outside it belongs to the frontend.
+// constant because anything outside it belongs to the frontend.
 const APIPrefix = "/api/"
 
 // Register attaches every route to the application's router.

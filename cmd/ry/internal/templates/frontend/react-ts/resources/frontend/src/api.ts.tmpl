@@ -6,9 +6,10 @@
 // compiled binary. There is no base URL to configure per environment, and no
 // CORS at all.
 //
-// Nothing here sends a CSRF token, and nothing needs to: the framework's CSRF
-// middleware skips /api, because a request the browser does not attach a cookie
-// credential to cannot be forged by another site.
+// Unsafe requests carry a CSRF token. The framework checks any request that
+// arrives with the session cookie, wherever it is addressed, because a signed-in
+// SPA calling /api is exactly as forgeable as a form post: the browser attaches
+// the cookie either way.
 
 const accept = { Accept: "application/json" };
 
@@ -53,11 +54,24 @@ export async function get<T>(path: string): Promise<T> {
 }
 
 // post sends one, or nothing at all when body is omitted.
+// csrfToken reads the token the framework issued.
+//
+// document.cookie hands back the signed cookie rather than the token inside it.
+// That is the string to send: the server accepts either, and it is the only one
+// a script can see. The cookie is deliberately not HttpOnly for this — what
+// protects it is same-origin policy, not secrecy, since another site can cause
+// the cookie to be sent but cannot read it to echo it back.
+function csrfToken(): string {
+	const match = document.cookie.match(/(?:^|;\s*)ryla_csrf=([^;]*)/);
+	return match ? decodeURIComponent(match[1]) : "";
+}
+
 export async function post<T>(path: string, body?: unknown): Promise<T> {
-	const options: RequestInit = { method: "POST", headers: accept };
+	const headers: Record<string, string> = { ...accept, "X-CSRF-Token": csrfToken() };
+	const options: RequestInit = { method: "POST", headers };
 
 	if (body !== undefined) {
-		options.headers = { ...accept, "Content-Type": "application/json" };
+		headers["Content-Type"] = "application/json";
 		options.body = JSON.stringify(body);
 	}
 	return unwrap<T>(await fetch(path, options));

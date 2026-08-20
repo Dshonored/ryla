@@ -5,6 +5,12 @@
 // can cause a browser to send the cookie, but same-origin policy stops it from
 // reading the cookie to echo the value back, so the two never match.
 //
+// A server-rendered form submits Token(ctx). A script has no context to read
+// that from, so it may instead send the cookie's own value back verbatim, which
+// is all document.cookie gives it — the cookie is deliberately not HttpOnly for
+// exactly that reason. Both are accepted, and both prove the same thing: that
+// the sender could read a cookie on this origin.
+//
 // The cookie is signed with the application key, which means a token cannot be
 // invented — only replayed from a real session, which same-origin policy
 // already prevents.
@@ -67,10 +73,22 @@ func Protect(cfg Config) func(http.Handler) http.Handler {
 			// Reuse the token already in the cookie so that opening a second
 			// tab does not invalidate the form in the first.
 			token, err := cfg.Jar.Get(r, CookieName)
+
+			// The signed form of the very same cookie, kept only when it
+			// verified. A script echoing document.cookie back can only produce
+			// this string, so it is accepted alongside the bare token — but
+			// only once the signature has been checked. Accepting whatever
+			// happened to arrive in the cookie would undo the signing: anyone
+			// able to plant a cookie on a sibling domain would then know a
+			// value that matches itself.
+			signed := ""
+
 			if err != nil || token == "" {
 				token = newToken()
 				readable := false
 				cfg.Jar.Set(w, CookieName, token, cookie.Options{HTTPOnly: &readable})
+			} else if c, cerr := r.Cookie(CookieName); cerr == nil {
+				signed = c.Value
 			}
 
 			ctx := context.WithValue(r.Context(), tokenKey, token)
@@ -81,7 +99,7 @@ func Protect(cfg Config) func(http.Handler) http.Handler {
 				return
 			}
 
-			if !valid(r, token) {
+			if !valid(r, token, signed) {
 				deny.ServeHTTP(w, r)
 				return
 			}
@@ -110,7 +128,10 @@ func safe(method string) bool {
 }
 
 // valid compares the submitted token with the cookie's.
-func valid(r *http.Request, expected string) bool {
+//
+// signed is the verified cookie value, or "" when this request arrived without
+// a usable one. It is what a script that read document.cookie sends.
+func valid(r *http.Request, expected, signed string) bool {
 	submitted := r.Header.Get(HeaderName)
 	if submitted == "" {
 		// Reading the form here is safe: ParseForm caches its result, so a
@@ -124,7 +145,13 @@ func valid(r *http.Request, expected string) bool {
 	}
 	// Constant time, so a wrong token cannot be refined guess by guess from
 	// timing differences.
-	return subtle.ConstantTimeCompare([]byte(submitted), []byte(expected)) == 1
+	if subtle.ConstantTimeCompare([]byte(submitted), []byte(expected)) == 1 {
+		return true
+	}
+	if signed == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(submitted), []byte(signed)) == 1
 }
 
 func newToken() string {

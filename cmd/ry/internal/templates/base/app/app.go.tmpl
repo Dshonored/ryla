@@ -149,11 +149,18 @@ func New() (*App, error) {
 	r.Use(session.Middleware(sessions, logger))
 	r.Use(csrf.Protect(csrf.Config{
 		Jar: jar,
-		// Requests authenticated by a bearer token rather than a cookie cannot
-		// be forged by a third-party page, because the browser does not attach
-		// the credential automatically.
+		// Forgery needs a credential the browser attaches by itself, and the
+		// session cookie is the only one this application has. A request
+		// arriving without it cannot be a forged one: there is nothing on it
+		// that another site could have caused to be sent. That covers a bearer
+		// token, a server-to-server call and curl alike.
+		//
+		// The path is deliberately not what decides this. Exempting /api/
+		// outright is only safe while nothing under it is authenticated by a
+		// cookie, and `ry make:auth` puts a signed-in session exactly there.
 		Skip: func(req *http.Request) bool {
-			return strings.HasPrefix(req.URL.Path, "/api/")
+			_, err := req.Cookie(session.CookieName)
+			return err != nil
 		},
 	}))
 

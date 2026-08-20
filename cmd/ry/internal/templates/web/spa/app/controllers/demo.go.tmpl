@@ -33,9 +33,10 @@ func NewDemo(a *app.App) *Demo {
 // value; POST increments it first, so a repeated call does not appear to reset
 // it. The count lives in memory, so it starts again when the process does.
 //
-// Nothing here carries a CSRF token, and it does not need to: /api/ is exempt,
-// which is what lets the page's own fetch calls, and any client holding a
-// bearer token, POST straight away.
+// The page's fetch calls send a CSRF token, because the framework checks any
+// request carrying the session cookie wherever it is addressed. A client with
+// no cookie at all — curl, or one holding a bearer token — has nothing that
+// could have been attached on its behalf, so it POSTs straight away.
 func (c *Demo) Counter(w http.ResponseWriter, r *http.Request) {
 	count := c.count.Load()
 	if r.Method == http.MethodPost {

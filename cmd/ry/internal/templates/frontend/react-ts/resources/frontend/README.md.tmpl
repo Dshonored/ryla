@@ -34,9 +34,11 @@ runtime, so the type is an assertion — but it is the assertion you were making
 anyway, written down. Keep those declarations next to the component that uses
 them and mirror the Go structs they come from.
 
-`/api` is exempt from CSRF checks, which is why `api.ts` sends no token. Add
-your endpoints under that prefix in `routes/web.go` and they inherit the same
-treatment.
+`post` sends a CSRF token, read from the cookie the framework issues. The check
+applies to any request arriving with the session cookie, whatever its path, so a
+signed-in page cannot be made to act by another site. A client with no cookie —
+curl, or one authenticating with a bearer token — is not challenged, because
+there is nothing on it a third party could have caused to be sent.
 
 ## Types are checked at build time
 
