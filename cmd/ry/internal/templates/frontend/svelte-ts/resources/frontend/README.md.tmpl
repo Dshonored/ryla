@@ -52,7 +52,18 @@ The checker is `svelte-check` rather than `tsc`, because tsc cannot parse a
 over with its markup understood. Components opt in with `<script lang="ts">`,
 which `svelte.config.js` already arranges.
 
-## The build is embedded
+{{if .Tailwind}}
+## Tailwind
+
+Tailwind v4 is installed and wired through the Vite plugin, and `src/app.css`
+hands it the design tokens: `bg-accent`, `text-muted` and `border-border` read
+the same variables the classes on the welcome page do, so the two can be mixed
+and the dark palette needs no Tailwind configuration.
+
+Nothing scans a config file for class names — v4 finds them itself — so there
+is no `tailwind.config.js` to keep in step.
+
+{{end}}## The build is embedded
 
 `vite build` writes `dist/`, and `resources/embed.go` compiles that directory
 into the Go binary. Deployment stays one file with nothing beside it — which is

@@ -2,6 +2,7 @@ package scaffold_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,7 +64,7 @@ func TestGeneratedProjectsCompile(t *testing.T) {
 				}
 				t.Run(name, func(t *testing.T) {
 					t.Parallel()
-					generateAndBuild(t, root, db.Name, web.Name, lang)
+					generateAndBuild(t, root, db.Name, web.Name, lang, "")
 				})
 			}
 		}
@@ -84,13 +85,13 @@ func languagesFor(web scaffold.WebMode) []string {
 	return names
 }
 
-func generateAndBuild(t *testing.T, root, db, web, lang string) {
+func generateAndBuild(t *testing.T, root, db, web, lang, css string) {
 	t.Helper()
 	ctx := context.Background()
 
 	dir := filepath.Join(t.TempDir(), "demo")
 
-	proj, err := scaffold.NewProject("demo", "demo", db, web, lang, "dev", goLangVersion(t))
+	proj, err := scaffold.NewProject("demo", "demo", db, web, lang, css, "dev", goLangVersion(t))
 	if err != nil {
 		t.Fatalf("build project: %v", err)
 	}
@@ -225,7 +226,7 @@ func TestAuthScaffoldCompiles(t *testing.T) {
 	root := repoRoot(t)
 	dir := filepath.Join(t.TempDir(), "demo")
 
-	proj, err := scaffold.NewProject("demo", "demo", "sqlite", "mvc", "", "dev", goLangVersion(t))
+	proj, err := scaffold.NewProject("demo", "demo", "sqlite", "mvc", "", "", "dev", goLangVersion(t))
 	if err != nil {
 		t.Fatalf("build project: %v", err)
 	}
@@ -275,4 +276,85 @@ func TestAuthScaffoldCompiles(t *testing.T) {
 
 func fixedTime() time.Time {
 	return time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+}
+
+// TestStylingChoiceReachesEveryFrontend covers the one dimension the build
+// above cannot see. Tailwind changes no Go code and no filenames — it is a
+// conditional in three templates per frontend — so a project scaffolded without
+// it compiles just as happily with a half-applied one, and the mistake would
+// only surface as a stylesheet that silently does nothing.
+//
+// It renders rather than builds, so it costs nothing and runs under -short.
+func TestStylingChoiceReachesEveryFrontend(t *testing.T) {
+	for _, web := range scaffold.WebModes() {
+		if !web.Available || web.Frontend == "" {
+			continue
+		}
+		for _, lang := range languagesFor(web) {
+			for _, styling := range scaffold.Stylings() {
+				t.Run(web.Name+"_"+lang+"_"+styling.Name, func(t *testing.T) {
+					files := render(t, web.Name, lang, styling.Name)
+
+					// Generated paths are slash-separated on every platform.
+					css := files["resources/frontend/src/app.css"]
+					pkg := files["resources/frontend/package.json"]
+					vite := files["resources/frontend/vite.config."+lang]
+
+					for _, c := range []struct {
+						file, name, want string
+					}{
+						{css, "app.css", `@import "tailwindcss";`},
+						{css, "app.css", "@theme inline"},
+						{pkg, "package.json", `"tailwindcss"`},
+						{vite, "vite.config", "tailwindcss()"},
+					} {
+						if got := strings.Contains(c.file, c.want); got != styling.Tailwind {
+							t.Errorf("%s contains %q = %v, want %v", c.name, c.want, got, styling.Tailwind)
+						}
+					}
+
+					// A conditional inside a JSON literal is the one that
+					// breaks quietly: a stray comma is still a file, and npm is
+					// the first thing to notice.
+					var parsed any
+					if err := json.Unmarshal([]byte(pkg), &parsed); err != nil {
+						t.Errorf("package.json is not valid JSON: %v\n%s", err, pkg)
+					}
+				})
+			}
+		}
+	}
+}
+
+// render scaffolds a project into a temp directory and returns its files by
+// relative path. Nothing is compiled.
+func render(t *testing.T, web, lang, css string) map[string]string {
+	t.Helper()
+
+	dir := t.TempDir()
+	proj, err := scaffold.NewProject("demo", "demo", "sqlite", web, lang, css, "dev", "1.25")
+	if err != nil {
+		t.Fatalf("build project: %v", err)
+	}
+
+	gen := &scaffold.Generator{
+		FS:       templates.FS,
+		Overlays: proj.Overlays(),
+		Dest:     dir,
+		Data:     proj,
+	}
+	written, err := gen.Run()
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	out := make(map[string]string, len(written))
+	for _, rel := range written {
+		raw, err := os.ReadFile(filepath.Join(dir, rel))
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		out[rel] = string(raw)
+	}
+	return out
 }

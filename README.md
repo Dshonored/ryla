@@ -76,6 +76,26 @@ to Vite while developing and serves the embedded build afterwards. `ry dev`
 runs both on one address, so `fetch("/api/...")` needs no base URL and there is
 no CORS to configure. Node is needed to build the frontend, never to run it.
 
+### Language and styling
+
+Both Vite modes ask two more questions, or take them as flags:
+
+| Flag | Options | Default |
+| --- | --- | --- |
+| `--lang` | `ts`, `js` | `ts` |
+| `--css` | `tailwind`, `plain` | `tailwind` |
+
+TypeScript is the default because the API client is generic over the shape each
+endpoint returns, so a field renamed on the Go side fails the build instead of
+rendering `undefined`. `ry build` runs the type checker — `svelte-check` for
+Svelte, `tsc` otherwise — before Vite compiles, since Vite strips types without
+looking at them.
+
+Either styling ships the same welcome page and the same design tokens.
+`tailwind` adds Tailwind v4 and hands it those tokens, so `bg-accent` and
+`var(--accent)` mean the same colour and the dark palette needs no Tailwind
+configuration at all. `plain` installs nothing extra.
+
 ## What a project looks like
 
 ```

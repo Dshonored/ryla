@@ -7,9 +7,18 @@
 
    This ships with the welcome page. Keep it and build on it, or replace it
    wholesale — nothing in the framework depends on these class names.
+{{- if .Tailwind}}
+
+   Tailwind is imported at the top and the tokens are handed to it below, so
+   utilities and these classes can be mixed freely and agree on the palette.
+   Everything here is unlayered, which is why Tailwind's preflight — which
+   lives in @layer base — cannot override it.
+{{- end}}
    --------------------------------------------------------------------------- */
 
-/* --- Tokens -------------------------------------------------------------- */
+{{if .Tailwind}}@import "tailwindcss";
+
+{{end}}/* --- Tokens -------------------------------------------------------------- */
 
 :root {
 	color-scheme: light dark;
@@ -69,6 +78,38 @@
 		--accent-subtle: #16233d;
 	}
 }
+{{- if .Tailwind}}
+
+/* --- Tokens, as Tailwind utilities --------------------------------------- */
+
+/* Hands the palette above to Tailwind, so bg-surface, text-muted and
+   border-border mean the same thing as var(--surface) does below. The tokens
+   stay the single source of truth: `inline` makes each utility emit the
+   variable itself rather than a copy of its value, which is also why the dark
+   palette needs no Tailwind configuration at all — the variable it reads has
+   already changed by the time the utility is applied. */
+@theme inline {
+	--color-bg: var(--bg);
+	--color-surface: var(--surface);
+	--color-surface-2: var(--surface-2);
+	--color-border: var(--border);
+
+	--color-text: var(--text);
+	--color-muted: var(--text-muted);
+	--color-subtle: var(--text-subtle);
+
+	--color-accent: var(--accent);
+	--color-accent-hover: var(--accent-hover);
+	--color-accent-contrast: var(--accent-contrast);
+	--color-accent-subtle: var(--accent-subtle);
+
+	--color-success: var(--success);
+	--color-danger: var(--danger);
+
+	--font-sans: var(--font);
+	--font-mono: var(--mono);
+}
+{{- end}}
 
 /* --- Base ---------------------------------------------------------------- */
 

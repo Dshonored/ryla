@@ -27,6 +27,7 @@ func newCmd() *cobra.Command {
 		database  string
 		web       string
 		lang      string
+		css       string
 		noPrompt  bool
 		skipDeps  bool
 		framework string
@@ -50,7 +51,7 @@ explicitly to skip the prompts, which is what you want in scripts and CI.
 				name = args[0]
 			}
 
-			a := answers{Name: name, Module: module, DB: database, Web: web, Lang: lang,
+			a := answers{Name: name, Module: module, DB: database, Web: web, Lang: lang, CSS: css,
 				Setup: dbSetup{Mode: dbSetupIn, URL: dbURL}}
 			if noPrompt || !interactive() {
 				a.applyDefaults()
@@ -67,6 +68,7 @@ explicitly to skip the prompts, which is what you want in scripts and CI.
 	f.StringVar(&database, "db", "", "database driver: "+strings.Join(availableDatabaseNames(), ", "))
 	f.StringVar(&web, "web", "", "web mode: "+strings.Join(availableWebModeNames(), ", "))
 	f.StringVar(&lang, "lang", "", "frontend language for react and svelte: "+strings.Join(languageNames(), ", "))
+	f.StringVar(&css, "css", "", "frontend styling for react and svelte: "+strings.Join(stylingNames(), ", "))
 	f.BoolVarP(&noPrompt, "yes", "y", false, "accept defaults instead of prompting")
 	f.BoolVar(&skipDeps, "skip-deps", false, "do not resolve dependencies or generate view code")
 	f.StringVar(&framework, "framework", "", "path to a local Ryla checkout to build against instead of the published module")
@@ -83,6 +85,7 @@ type answers struct {
 	DB     string
 	Web    string
 	Lang   string
+	CSS    string
 	Setup  dbSetup
 }
 
@@ -101,6 +104,9 @@ func (a *answers) applyDefaults() {
 	}
 	if a.Lang == "" {
 		a.Lang = scaffold.DefaultLanguage
+	}
+	if a.CSS == "" {
+		a.CSS = scaffold.DefaultStyling
 	}
 	if a.Setup.URL != "" {
 		a.Setup.Mode = SetupExternal
@@ -158,21 +164,34 @@ func (a *answers) prompt() error {
 		}
 	}
 
-	// Asked after the form rather than inside it, because whether it is a
-	// question at all depends on the web mode chosen a moment ago.
-	if a.Lang == "" {
+	// Asked after the form rather than inside it, because whether these are
+	// questions at all depends on the web mode chosen a moment ago.
+	if a.Lang == "" || a.CSS == "" {
 		web, err := scaffold.LookupWebMode(a.Web)
 		if err != nil {
 			return err
 		}
 		if web.Frontend != "" {
-			a.Lang = scaffold.DefaultLanguage
-			if err := runForm(huh.NewForm(huh.NewGroup(
-				huh.NewSelect[string]().
-					Title("Language for the " + web.Frontend + " frontend").
-					Options(languageOptions()...).
-					Value(&a.Lang),
-			))); err != nil {
+			var groups []*huh.Group
+			if a.Lang == "" {
+				a.Lang = scaffold.DefaultLanguage
+				groups = append(groups, huh.NewGroup(
+					huh.NewSelect[string]().
+						Title("Language for the "+web.Frontend+" frontend").
+						Options(languageOptions()...).
+						Value(&a.Lang),
+				))
+			}
+			if a.CSS == "" {
+				a.CSS = scaffold.DefaultStyling
+				groups = append(groups, huh.NewGroup(
+					huh.NewSelect[string]().
+						Title("Styling").
+						Options(stylingOptions()...).
+						Value(&a.CSS),
+				))
+			}
+			if err := runForm(huh.NewForm(groups...)); err != nil {
 				return err
 			}
 		}
@@ -257,7 +276,7 @@ func runNew(ctx context.Context, out io.Writer, a answers, skipDeps bool, framew
 		}
 	}
 
-	proj, err := scaffold.NewProject(a.Name, a.Module, a.DB, a.Web, a.Lang, frameworkVersion, toolchain.GoVersion(ctx))
+	proj, err := scaffold.NewProject(a.Name, a.Module, a.DB, a.Web, a.Lang, a.CSS, frameworkVersion, toolchain.GoVersion(ctx))
 	if err != nil {
 		return err
 	}
@@ -415,6 +434,22 @@ func languageNames() []string {
 	names := make([]string, 0, len(scaffold.Languages()))
 	for _, l := range scaffold.Languages() {
 		names = append(names, l.Name)
+	}
+	return names
+}
+
+func stylingOptions() []huh.Option[string] {
+	opts := make([]huh.Option[string], 0, len(scaffold.Stylings()))
+	for _, st := range scaffold.Stylings() {
+		opts = append(opts, huh.NewOption(st.Label+" — "+st.Summary, st.Name))
+	}
+	return opts
+}
+
+func stylingNames() []string {
+	names := make([]string, 0, len(scaffold.Stylings()))
+	for _, st := range scaffold.Stylings() {
+		names = append(names, st.Name)
 	}
 	return names
 }

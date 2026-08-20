@@ -198,7 +198,7 @@ func TestProjectValidation(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := NewProject(tc.project, tc.mod, tc.db, tc.web, "", "dev", "1.25")
+			_, err := NewProject(tc.project, tc.mod, tc.db, tc.web, "", "", "dev", "1.25")
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("NewProject error = %v, wantErr = %v", err, tc.wantErr)
 			}
@@ -207,7 +207,7 @@ func TestProjectValidation(t *testing.T) {
 }
 
 func TestProjectOverlayOrder(t *testing.T) {
-	p, err := NewProject("demo", "demo", "sqlite", "mvc", "", "dev", "1.25")
+	p, err := NewProject("demo", "demo", "sqlite", "mvc", "", "", "dev", "1.25")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestProjectOverlayOrder(t *testing.T) {
 // it defines and the sharing would become a constraint instead of a
 // convenience.
 func TestFrontendOverlayIsAppliedLast(t *testing.T) {
-	p, err := NewProject("demo", "demo", "sqlite", "react", "ts", "dev", "1.25")
+	p, err := NewProject("demo", "demo", "sqlite", "react", "ts", "plain", "dev", "1.25")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestViteModesAreMarkedForTheManifest(t *testing.T) {
 		{web: "svelte", vite: true},
 	} {
 		t.Run(tc.web, func(t *testing.T) {
-			p, err := NewProject("demo", "demo", "sqlite", tc.web, "", "dev", "1.25")
+			p, err := NewProject("demo", "demo", "sqlite", tc.web, "", "", "dev", "1.25")
 			if err != nil {
 				t.Fatal(err)
 			}

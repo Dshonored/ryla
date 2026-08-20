@@ -45,7 +45,7 @@ func TestTwoFactorScaffoldCompiles(t *testing.T) {
 	root := repoRoot(t)
 	dir := filepath.Join(t.TempDir(), "demo")
 
-	proj, err := scaffold.NewProject("demo", "demo", "sqlite", "mvc", "", "dev", goLangVersion(t))
+	proj, err := scaffold.NewProject("demo", "demo", "sqlite", "mvc", "", "", "dev", goLangVersion(t))
 	if err != nil {
 		t.Fatalf("build project: %v", err)
 	}

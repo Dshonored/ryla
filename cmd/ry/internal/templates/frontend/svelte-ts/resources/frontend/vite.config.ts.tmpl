@@ -1,5 +1,6 @@
 import { defineConfig } from "vite";
-import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { svelte } from "@sveltejs/vite-plugin-svelte";{{if .Tailwind}}
+import tailwindcss from "@tailwindcss/vite";{{end}}
 
 // Vite's half of the arrangement `ry dev` sets up.
 //
@@ -12,7 +13,7 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 // `ry build` runs this same config with `vite build`, and the resulting dist/
 // is compiled into the binary by resources/embed.go.
 export default defineConfig({
-	plugins: [svelte()],
+	plugins: [{{if .Tailwind}}tailwindcss(), {{end}}svelte()],
 
 	// The terminal belongs to `ry dev`, which has already printed the address
 	// to open. Letting Vite clear it would wipe that away a second later.

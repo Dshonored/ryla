@@ -50,7 +50,18 @@ npm run check
 One `tsconfig.json` covers `src/` and `vite.config.ts`. It is strict, and
 `allowImportingTsExtensions` is why imports here are written `./App.tsx`.
 
-## The build is embedded
+{{if .Tailwind}}
+## Tailwind
+
+Tailwind v4 is installed and wired through the Vite plugin, and `src/app.css`
+hands it the design tokens: `bg-accent`, `text-muted` and `border-border` read
+the same variables the classes on the welcome page do, so the two can be mixed
+and the dark palette needs no Tailwind configuration.
+
+Nothing scans a config file for class names — v4 finds them itself — so there
+is no `tailwind.config.js` to keep in step.
+
+{{end}}## The build is embedded
 
 `vite build` writes `dist/`, and `resources/embed.go` compiles that directory
 into the Go binary. Deployment stays one file with nothing beside it — which is

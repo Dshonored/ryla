@@ -214,6 +214,57 @@ func languageNames() []string {
 	return out
 }
 
+// Styling is how a Vite frontend's CSS gets written. Unlike the language it
+// changes no filenames, so it is a handful of conditionals in three templates
+// rather than an overlay of its own.
+type Styling struct {
+	Name    string
+	Label   string
+	Summary string
+	// Tailwind marks the option that installs it, which is what the templates
+	// actually branch on.
+	Tailwind bool
+}
+
+var stylings = []Styling{
+	{
+		Name:     "tailwind",
+		Label:    "Tailwind CSS",
+		Summary:  "Utility classes, with the design tokens below wired in as Tailwind colours.",
+		Tailwind: true,
+	},
+	{
+		Name:    "plain",
+		Label:   "Plain CSS",
+		Summary: "The design system that ships with the welcome page, and nothing else.",
+	},
+}
+
+// DefaultStyling is what `ry new` selects when nothing says otherwise.
+const DefaultStyling = "tailwind"
+
+// Stylings lists every styling option.
+func Stylings() []Styling { return stylings }
+
+// LookupStyling finds a styling by name.
+func LookupStyling(name string) (Styling, error) {
+	for _, st := range stylings {
+		if st.Name == name {
+			return st, nil
+		}
+	}
+	return Styling{}, fmt.Errorf("unknown styling %q (available: %s)", name, strings.Join(stylingNames(), ", "))
+}
+
+func stylingNames() []string {
+	out := make([]string, 0, len(stylings))
+	for _, st := range stylings {
+		out = append(out, st.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Databases lists every known database option.
 func Databases() []Database { return databases }
 
@@ -280,6 +331,12 @@ type Project struct {
 	// mode with a Vite frontend, and empty for the rest rather than carrying a
 	// value no template can use.
 	Lang string
+	// CSS is the styling choice, "tailwind" or "plain", on the same terms.
+	CSS string
+	// Tailwind is CSS == "tailwind", kept as its own field because that is what
+	// the templates branch on and {{if .Tailwind}} reads better in a stylesheet
+	// than a string comparison.
+	Tailwind bool
 
 	RylaModule  string
 	RylaVersion string
@@ -305,7 +362,7 @@ func NewAppKey() (string, error) {
 }
 
 // NewProject validates the inputs and fills in everything derived from them.
-func NewProject(name, module, dbName, webName, langName, rylaVersion, goVersion string) (*Project, error) {
+func NewProject(name, module, dbName, webName, langName, cssName, rylaVersion, goVersion string) (*Project, error) {
 	if name == "" {
 		return nil, fmt.Errorf("project name is required")
 	}
@@ -330,7 +387,7 @@ func NewProject(name, module, dbName, webName, langName, rylaVersion, goVersion 
 	// A language is only a question for a frontend that has one. Answering it
 	// for an mvc project would put a field in the manifest that nothing reads
 	// and that would be wrong the moment the mode changed.
-	lang := ""
+	lang, css, tailwind := "", "", false
 	if web.Frontend != "" {
 		if langName == "" {
 			langName = DefaultLanguage
@@ -340,6 +397,15 @@ func NewProject(name, module, dbName, webName, langName, rylaVersion, goVersion 
 			return nil, err
 		}
 		lang = l.Name
+
+		if cssName == "" {
+			cssName = DefaultStyling
+		}
+		st, err := LookupStyling(cssName)
+		if err != nil {
+			return nil, err
+		}
+		css, tailwind = st.Name, st.Tailwind
 	}
 
 	key, err := NewAppKey()
@@ -354,6 +420,8 @@ func NewProject(name, module, dbName, webName, langName, rylaVersion, goVersion 
 		DB:             db.Name,
 		Web:            web.Name,
 		Lang:           lang,
+		CSS:            css,
+		Tailwind:       tailwind,
 		RylaModule:     RylaModule,
 		RylaVersion:    rylaVersion,
 		GoVersion:      goVersion,
