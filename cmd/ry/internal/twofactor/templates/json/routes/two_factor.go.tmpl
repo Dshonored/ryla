@@ -1,0 +1,49 @@
+package routes
+
+import (
+	"net/http"
+
+	"{{.RylaModule}}/router"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/controllers"
+	appmw "{{.Module}}/app/middleware"
+	"{{.Module}}/app/models"
+)
+
+// RegisterTwoFactor attaches the two-factor endpoints and the guard that holds
+// a signed-in session at the challenge.
+//
+// Call it from Register in web.go, after RegisterAuth(a). It is a separate
+// function in its own file so that `ry make:2fa` never had to rewrite your
+// route table.
+func RegisterTwoFactor(a *app.App) {
+	twoFactor := controllers.NewTwoFactor(a)
+
+	// The guard runs on everything. A signed-in session that has not answered
+	// the challenge is held here, wherever it tries to go — see the middleware
+	// for why that is not the sign-in handler's job.
+	//
+	// It answers 403 rather than redirecting: a client that parses every
+	// response cannot act on a 302 to a page. The body names the reason, so the
+	// frontend knows to show the challenge rather than the sign-in screen.
+	a.Router.Use(appmw.RequireTwoFactor(
+		models.TwoFactorEnabled(a.DB),
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			controllers.WriteError(w, r, http.StatusForbidden,
+				"Two-factor authentication is required for this session.", nil)
+		}),
+	))
+
+	a.Router.Route("/api/two-factor", func(r *router.Router) {
+		r.Get("/", twoFactor.Status).Name("api.two-factor.status")
+		r.Post("/", twoFactor.Challenge).Name("api.two-factor.challenge")
+		r.Post("/recovery", twoFactor.Recover).Name("api.two-factor.recovery")
+
+		r.Post("/setup", twoFactor.StartSetup).Name("api.two-factor.setup")
+		r.Get("/setup/qr.png", twoFactor.SetupQRCode).Name("api.two-factor.setup.qr")
+		r.Post("/setup/confirm", twoFactor.Enable).Name("api.two-factor.setup.confirm")
+
+		r.Post("/disable", twoFactor.Disable).Name("api.two-factor.disable")
+	})
+}

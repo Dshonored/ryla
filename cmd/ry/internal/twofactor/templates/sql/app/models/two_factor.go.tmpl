@@ -1,0 +1,40 @@
+package models
+
+import (
+	"context"
+	"errors"
+	"strconv"
+
+	"gorm.io/gorm"
+)
+
+// TwoFactorEnabled answers whether an account has a second factor, for the
+// middleware that holds a session at the challenge.
+//
+// Only the flag is selected. This runs on every request, and there is no reason
+// to pull an encrypted secret through memory to answer a yes-or-no question.
+//
+// A missing account answers false rather than an error: the session names a
+// user who no longer exists, which is treated as signed out — the same way
+// CurrentUser treats it — rather than as a challenge nobody can pass.
+func TwoFactorEnabled(db *gorm.DB) func(ctx context.Context, userID string) (bool, error) {
+	return func(ctx context.Context, userID string) (bool, error) {
+		id, err := strconv.ParseUint(userID, 10, 64)
+		if err != nil {
+			return false, nil
+		}
+
+		var user User
+		err = db.WithContext(ctx).
+			Select("id", "two_factor_enabled").
+			First(&user, uint(id)).Error
+
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return user.TwoFactorEnabled, nil
+	}
+}

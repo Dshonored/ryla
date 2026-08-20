@@ -258,6 +258,26 @@ func VerifyAt(secret, code string, t time.Time, opts Options) bool {
 	return ok
 }
 
+// Code returns the code an authenticator app would be showing right now.
+//
+// It exists for tests and for tooling — a feature test of an enrolment flow has
+// to be able to answer the challenge it is testing, and without this it would
+// have to reach past the framework to the TOTP library to do it.
+//
+// Nothing is given away by having it. Anyone holding the secret can compute its
+// codes; that is what a shared secret is. What matters is that the secret is
+// sealed before it is stored, which is Vault's job.
+func Code(secret string, opts Options) (string, error) {
+	return CodeAt(secret, time.Now(), opts)
+}
+
+// CodeAt is Code at an explicit time, for testing drift and expiry without
+// waiting thirty seconds for a code to go stale.
+func CodeAt(secret string, t time.Time, opts Options) (string, error) {
+	opts = opts.withDefaults()
+	return totp.GenerateCodeCustom(secret, t.UTC(), opts.validateOpts())
+}
+
 // normalizeCode strips the spaces authenticator apps put in the middle of a
 // code for legibility, which come along when it is copied rather than typed.
 func normalizeCode(code string) string {

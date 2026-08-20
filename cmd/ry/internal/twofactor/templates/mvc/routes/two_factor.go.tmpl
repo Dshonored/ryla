@@ -1,0 +1,44 @@
+package routes
+
+import (
+	"net/http"
+
+	"{{.RylaModule}}/router"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/controllers"
+	appmw "{{.Module}}/app/middleware"
+	"{{.Module}}/app/models"
+)
+
+// RegisterTwoFactor attaches the two-factor routes and the guard that holds a
+// signed-in session at the challenge.
+//
+// Call it from Register in web.go, after RegisterAuth(a). It is a separate
+// function in its own file so that `ry make:2fa` never had to rewrite your
+// route table.
+func RegisterTwoFactor(a *app.App) {
+	twoFactor := controllers.NewTwoFactor(a)
+
+	// The guard runs on everything. A signed-in session that has not answered
+	// the challenge is held here, wherever it tries to go — see the middleware
+	// for why that is not the sign-in handler's job.
+	a.Router.Use(appmw.RequireTwoFactor(
+		models.TwoFactorEnabled(a.DB),
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/two-factor", http.StatusSeeOther)
+		}),
+	))
+
+	a.Router.Group(func(r *router.Router) {
+		r.Get("/two-factor", twoFactor.ShowChallenge).Name("two-factor.challenge")
+		r.Post("/two-factor", twoFactor.Challenge).Name("two-factor.challenge.verify")
+		r.Post("/two-factor/recovery", twoFactor.Recover).Name("two-factor.recovery")
+
+		r.Get("/two-factor/setup", twoFactor.ShowSetup).Name("two-factor.setup")
+		r.Get("/two-factor/setup/qr.png", twoFactor.SetupQRCode).Name("two-factor.setup.qr")
+		r.Post("/two-factor/setup", twoFactor.Enable).Name("two-factor.setup.enable")
+
+		r.Post("/two-factor/disable", twoFactor.Disable).Name("two-factor.disable")
+	})
+}

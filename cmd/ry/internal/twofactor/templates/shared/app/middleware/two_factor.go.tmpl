@@ -1,30 +1,33 @@
 package middleware
 
 import (
-	"errors"
+	"context"
 	"net/http"
 	"strings"
-
-	"gorm.io/gorm"
 
 	"{{.RylaModule}}/auth"
 	"{{.RylaModule}}/session"
 	"{{.RylaModule}}/twofactor"
-
-	"{{.Module}}/app/models"
 )
 
-// twoFactorExempt are the paths a half-signed-in visitor may still reach.
-//
-// The challenge itself, obviously, or the redirect would loop. Logout, because
+// Exempt paths, or the challenge could never be answered. /logout too, because
 // somebody who cannot complete the challenge must still be able to end the
 // session rather than being trapped in it. And the static assets, so the
 // challenge page has its stylesheet.
 var twoFactorExempt = []string{
 	"/two-factor",
+	"/api/two-factor",
 	"/logout",
+	"/api/auth/logout",
 	"/static",
 }
+
+// TwoFactorLookup answers whether an account has a second factor enabled.
+//
+// A function rather than a database handle: the query differs completely
+// between a SQL project and a document store, and the rule below — which is the
+// part worth getting right — does not. models supplies the implementation.
+type TwoFactorLookup func(ctx context.Context, userID string) (bool, error)
 
 // RequireTwoFactor holds a signed-in session at the challenge until it has
 // been cleared.
@@ -38,39 +41,27 @@ var twoFactorExempt = []string{
 //
 // It is deliberately not the same thing as being signed out. The session does
 // identify a user, and the password has already been checked; what is missing
-// is the second factor, and that is all this withholds.
-func RequireTwoFactor(db *gorm.DB) func(http.Handler) http.Handler {
+// is the second factor, and that is all this withholds. unmet is what says so —
+// a redirect for a browser, a 403 for a client that parses its responses.
+func RequireTwoFactor(enabled TwoFactorLookup, unmet http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			s := session.From(r.Context())
 
-			id, ok := auth.UintID(s)
-			if !ok || twofactor.Passed(s) || exemptFromTwoFactor(r.URL.Path) {
+			id := auth.ID(s)
+			if id == "" || twofactor.Passed(s) || exemptFromTwoFactor(r.URL.Path) {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			// Only the flag is selected. This runs on every request, and there
-			// is no reason to pull an encrypted secret through memory to answer
-			// a yes-or-no question.
-			var user models.User
-			err := db.WithContext(r.Context()).
-				Select("id", "two_factor_enabled").
-				First(&user, id).Error
-
+			on, err := enabled(r.Context(), id)
 			switch {
-			case errors.Is(err, gorm.ErrRecordNotFound):
-				// The session names a user who no longer exists. Treated as
-				// signed out, the same way CurrentUser treats it, rather than
-				// as a challenge nobody can pass.
-				next.ServeHTTP(w, r)
-				return
 			case err != nil:
 				// Failing open would turn a database blip into a way past the
 				// second factor, so this fails closed.
 				http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 				return
-			case !user.TwoFactorEnabled:
+			case !on:
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -81,7 +72,7 @@ func RequireTwoFactor(db *gorm.DB) func(http.Handler) http.Handler {
 				s.Put(auth.IntendedKey, r.URL.RequestURI())
 			}
 
-			http.Redirect(w, r, "/two-factor", http.StatusSeeOther)
+			unmet.ServeHTTP(w, r)
 		})
 	}
 }

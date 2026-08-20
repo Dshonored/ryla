@@ -245,3 +245,48 @@ func TestURIRefusesAnUnusableSecret(t *testing.T) {
 		t.Error("a URI was built with no issuer")
 	}
 }
+
+// TestCodeVerifies is the round trip the feature tests of a generated project
+// depend on: a code produced here has to be one Verify accepts, or every
+// enrolment test would be asserting against a challenge it cannot answer.
+func TestCodeVerifies(t *testing.T) {
+	secret, err := NewSecret("someone@example.com", Options{Issuer: "Ryla"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, err := Code(secret.Base32, Options{})
+	if err != nil {
+		t.Fatalf("generate a code: %v", err)
+	}
+	if !Verify(secret.Base32, code, Options{}) {
+		t.Errorf("the generated code %q was rejected", code)
+	}
+}
+
+// TestCodeAtRespectsTheClock checks that codes really are time-based, which is
+// what makes the skew window in Verify meaningful rather than decorative.
+func TestCodeAtRespectsTheClock(t *testing.T) {
+	secret, err := NewSecret("someone@example.com", Options{Issuer: "Ryla"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+
+	early, err := CodeAt(secret.Base32, now.Add(-10*time.Minute), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := CodeAt(secret.Base32, now, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if early == current {
+		t.Error("a code from ten minutes ago is the same as the current one")
+	}
+	if Verify(secret.Base32, early, Options{}) {
+		t.Error("a code from ten minutes ago is still accepted")
+	}
+}

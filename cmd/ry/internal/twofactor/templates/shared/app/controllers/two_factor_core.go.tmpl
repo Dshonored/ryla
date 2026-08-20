@@ -1,0 +1,291 @@
+package controllers
+
+import (
+	"errors"
+	"net/http"
+	"time"
+
+	ryauth "{{.RylaModule}}/auth"
+	"{{.RylaModule}}/session"
+	"{{.RylaModule}}/twofactor"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/models"
+)
+
+// The outcomes of checking a code that a caller has to tell apart. Anything
+// else is a server error and is reported as one.
+var (
+	// errNoSession means nobody is signed in. The two-factor pages sit behind
+	// a sign-in, so this is "go back to the login form", not a failure.
+	errNoSession = errors.New("not signed in")
+
+	// errWrongCode is a code that did not verify. It says nothing about why,
+	// because there is nothing useful to say: a code is right or it is not.
+	errWrongCode = errors.New("that code is not right")
+
+	// errNotEnrolled means the account has no second factor to challenge,
+	// disable or recover.
+	errNotEnrolled = errors.New("two-factor authentication is not enabled")
+)
+
+// errTooManyAttempts reports that verification has been refused for now. Six
+// digits is a million guesses, and a million guesses is an afternoon, so the
+// throttle is the only thing standing between a TOTP code and brute force.
+type errTooManyAttempts struct {
+	RetryAfter time.Duration
+}
+
+func (e errTooManyAttempts) Error() string {
+	return "too many attempts; try again in " + e.RetryAfter.Round(time.Second).String()
+}
+
+// twoFactorCore is the two-factor flow with nothing about how it is presented.
+//
+// Everything that has to be right lives here — that a secret is sealed before
+// it is stored, that enabling is one write, that a recovery code is spent
+// before it lets anybody in, that the throttle counts against the account —
+// so the pages and the JSON endpoints cannot come to different conclusions.
+type twoFactorCore struct {
+	app   *app.App
+	users userStore
+	store twoFactorStore
+
+	// vault seals secrets before they reach the database, and opens them again
+	// to check a code.
+	vault *twofactor.Vault
+
+	// verifier is what actually checks codes. It carries the throttle, which is
+	// why every path below goes through it instead of calling twofactor.Verify.
+	verifier *twofactor.Verifier
+
+	opts twofactor.Options
+}
+
+// newTwoFactorCore builds the flow.
+//
+// It refuses to start without APP_KEY, at boot rather than at the first
+// request. Secrets are sealed with that key, and sealing them with nothing is
+// the same as storing them in plaintext — which would leave the second factor
+// defending against everybody except the attacker who has the database, the one
+// it was added for.
+func newTwoFactorCore(a *app.App) twoFactorCore {
+	opts := twofactor.Options{Issuer: a.Config.Name}
+
+	vault, err := twofactor.NewVault(a.Config.Key)
+	if err != nil {
+		panic("two-factor authentication cannot start: " + err.Error() +
+			". Generate a key with: ry key:generate")
+	}
+
+	return twoFactorCore{
+		app:      a,
+		users:    newUserStore(a.DB),
+		store:    newTwoFactorStore(a.DB),
+		vault:    vault,
+		verifier: twofactor.NewVerifier(opts),
+		opts:     opts,
+	}
+}
+
+// User loads the signed-in account.
+//
+// It reads the database rather than the request context so that this works
+// whichever order the route files were registered in. The two-factor pages are
+// a handful of requests per sign-in, so the extra query is not worth a subtle
+// ordering dependency.
+func (c twoFactorCore) User(r *http.Request) (models.User, error) {
+	id := ryauth.ID(session.From(r.Context()))
+	if id == "" {
+		return models.User{}, errNoSession
+	}
+
+	user, err := c.users.FindByID(r.Context(), id)
+	if err != nil {
+		return models.User{}, errNoSession
+	}
+	return user, nil
+}
+
+// PendingSecret returns the plaintext secret for the enrolment in progress,
+// starting one if there is none.
+//
+// The secret waits in the session, sealed, rather than in the users table: an
+// abandoned enrolment then leaves nothing behind, and a half-scanned secret can
+// never be mistaken for a live one. It is sealed even there because the cookie
+// session store signs its contents but does not encrypt them.
+//
+// The same secret is returned on every call until it is confirmed. Generating a
+// fresh one per page view would silently invalidate the QR code the moment
+// somebody refreshed.
+func (c twoFactorCore) PendingSecret(r *http.Request, user models.User) (string, error) {
+	s := session.From(r.Context())
+
+	if sealed := twofactor.PendingSecret(s); sealed != "" {
+		return c.vault.Open(sealed)
+	}
+
+	fresh, err := twofactor.NewSecret(user.Email, c.opts)
+	if err != nil {
+		return "", err
+	}
+	sealed, err := c.vault.Seal(fresh.Base32)
+	if err != nil {
+		return "", err
+	}
+
+	twofactor.PutPendingSecret(s, sealed)
+	return fresh.Base32, nil
+}
+
+// QRCode renders the enrolment QR code for the secret waiting in the session.
+func (c twoFactorCore) QRCode(r *http.Request, user models.User, size int) ([]byte, error) {
+	secret, err := c.PendingSecret(r, user)
+	if err != nil {
+		return nil, err
+	}
+
+	uri, err := twofactor.URI(user.Email, secret, c.opts)
+	if err != nil {
+		return nil, err
+	}
+	return twofactor.QRCodePNG(uri, size)
+}
+
+// Enable confirms an enrolment and turns the second factor on, returning the
+// recovery codes.
+//
+// The codes are returned rather than stored: only their hashes are kept, so
+// this is the one and only moment they can be read.
+func (c twoFactorCore) Enable(w http.ResponseWriter, r *http.Request, user models.User, code string) ([]string, error) {
+	secret, err := c.PendingSecret(r, user)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := c.check(user, secret, code); err != nil {
+		return nil, err
+	}
+
+	codes, err := twofactor.GenerateRecoveryCodes(twofactor.DefaultRecoveryCodes)
+	if err != nil {
+		return nil, err
+	}
+
+	sealed, err := c.vault.Seal(secret)
+	if err != nil {
+		return nil, err
+	}
+
+	// One write, so an account can never be left with the flag set and no
+	// secret behind it — which would lock the user out of their own account
+	// with no code that could ever open it.
+	if err := c.store.Enable(r.Context(), &user, sealed, twofactor.HashRecoveryCodes(codes)); err != nil {
+		return nil, err
+	}
+
+	// They have just proved they hold the second factor, so this session has
+	// cleared the challenge. Without it the middleware would bounce them
+	// straight back here.
+	twofactor.MarkPassed(session.From(r.Context()))
+	return codes, nil
+}
+
+// Challenge checks a code against the account's stored secret and, if it
+// verifies, lets the session through.
+func (c twoFactorCore) Challenge(w http.ResponseWriter, r *http.Request, user models.User, code string) error {
+	secret, err := c.vault.Open(user.TwoFactorSecret)
+	if err != nil {
+		return err
+	}
+
+	if err := c.check(user, secret, code); err != nil {
+		return err
+	}
+
+	twofactor.MarkPassed(session.From(r.Context()))
+	return nil
+}
+
+// Recover spends one recovery code and lets the session through.
+//
+// This is the door for a lost phone, and it is the reason recovery codes exist
+// at all: without them, a dropped handset is a closed account and the only way
+// back in is a support ticket answered by trusting somebody's email address,
+// which is exactly the trust two-factor authentication was meant to stop
+// relying on.
+func (c twoFactorCore) Recover(w http.ResponseWriter, r *http.Request, user models.User, code string) (left int, err error) {
+	remaining, accepted, retryAfter := c.verifier.VerifyRecovery(
+		c.subject(user), user.TwoFactorRecoveryCodes, code)
+
+	switch {
+	case retryAfter > 0:
+		return 0, errTooManyAttempts{RetryAfter: retryAfter}
+	case !accepted:
+		return 0, errWrongCode
+	}
+
+	// Spent before the session is let through. A code that signed somebody in
+	// and then failed to save would still be usable, which is the one thing a
+	// recovery code must never be.
+	if err := c.store.SetRecoveryCodes(r.Context(), &user, remaining); err != nil {
+		return 0, err
+	}
+
+	twofactor.MarkPassed(session.From(r.Context()))
+	return twofactor.CountRecoveryCodes(remaining), nil
+}
+
+// Disable turns the second factor off, once a current code has proved it is
+// the enrolled person asking.
+//
+// Without that code anybody who found an unlocked laptop could take the second
+// factor off in a single click, which would make it a speed bump rather than a
+// defence.
+func (c twoFactorCore) Disable(r *http.Request, user models.User, code string) error {
+	if !user.TwoFactorEnabled {
+		return errNotEnrolled
+	}
+
+	secret, err := c.vault.Open(user.TwoFactorSecret)
+	if err != nil {
+		return err
+	}
+
+	if err := c.check(user, secret, code); err != nil {
+		return err
+	}
+
+	// The recovery codes go with the secret. Leaving them behind would keep a
+	// set of working single-factor passwords on an account that no longer has a
+	// second factor to protect.
+	return c.store.Disable(r.Context(), &user)
+}
+
+// Passed reports whether this session has already cleared the challenge.
+func (c twoFactorCore) Passed(r *http.Request) bool {
+	return twofactor.Passed(session.From(r.Context()))
+}
+
+// RecoveryCodesLeft reports how many unused codes the account has.
+func (c twoFactorCore) RecoveryCodesLeft(user models.User) int {
+	return twofactor.CountRecoveryCodes(user.TwoFactorRecoveryCodes)
+}
+
+// check runs a code past the verifier and turns its two refusals into errors.
+func (c twoFactorCore) check(user models.User, secret, code string) error {
+	accepted, retryAfter := c.verifier.Verify(c.subject(user), secret, code)
+	switch {
+	case retryAfter > 0:
+		return errTooManyAttempts{RetryAfter: retryAfter}
+	case !accepted:
+		return errWrongCode
+	}
+	return nil
+}
+
+// subject is what the throttle counts against: the account, not the address
+// typed into a form, so that respelling an email cannot buy a fresh budget.
+func (c twoFactorCore) subject(user models.User) string {
+	return "2fa:" + user.SessionID()
+}

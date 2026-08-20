@@ -1,0 +1,70 @@
+package controllers
+
+import (
+	"context"
+
+	"gorm.io/gorm"
+
+	"{{.Module}}/app/models"
+)
+
+// twoFactorStore is every database write the two-factor flow performs.
+//
+// It sits beside userStore for the same reason: the flow above it decides what
+// should happen, and this decides how to say it to the database in front of it.
+type twoFactorStore struct {
+	db *gorm.DB
+}
+
+func newTwoFactorStore(db *gorm.DB) twoFactorStore { return twoFactorStore{db: db} }
+
+// Enable turns the second factor on in a single write.
+//
+// One statement, not three: an account left with the flag set and no secret
+// behind it is locked out of itself, with no code that could ever open it.
+func (s twoFactorStore) Enable(ctx context.Context, user *models.User, sealedSecret, hashedCodes string) error {
+	err := s.db.WithContext(ctx).Model(user).Updates(map[string]any{
+		"two_factor_secret":         sealedSecret,
+		"two_factor_enabled":        true,
+		"two_factor_recovery_codes": hashedCodes,
+	}).Error
+	if err != nil {
+		return err
+	}
+
+	user.TwoFactorSecret = sealedSecret
+	user.TwoFactorEnabled = true
+	user.TwoFactorRecoveryCodes = hashedCodes
+	return nil
+}
+
+// SetRecoveryCodes stores what is left after one has been spent.
+func (s twoFactorStore) SetRecoveryCodes(ctx context.Context, user *models.User, remaining string) error {
+	if err := s.db.WithContext(ctx).Model(user).Update("two_factor_recovery_codes", remaining).Error; err != nil {
+		return err
+	}
+
+	user.TwoFactorRecoveryCodes = remaining
+	return nil
+}
+
+// Disable clears the secret, the flag and the recovery codes together.
+//
+// The codes go with the secret. Left behind, they would be a set of working
+// single-factor passwords on an account that no longer has a second factor to
+// protect.
+func (s twoFactorStore) Disable(ctx context.Context, user *models.User) error {
+	err := s.db.WithContext(ctx).Model(user).Updates(map[string]any{
+		"two_factor_secret":         "",
+		"two_factor_enabled":        false,
+		"two_factor_recovery_codes": "",
+	}).Error
+	if err != nil {
+		return err
+	}
+
+	user.TwoFactorSecret = ""
+	user.TwoFactorEnabled = false
+	user.TwoFactorRecoveryCodes = ""
+	return nil
+}

@@ -183,9 +183,9 @@ instead.
 
 `ry make:auth` writes the whole flow as ordinary code you own: a User model and
 its migration, registration, sign-in, sign-out, email verification and password
-reset. `ry make:2fa` adds TOTP on top — an enrolment page with a QR code, a
-challenge that holds a signed-in session until it is answered, and single-use
-recovery codes.
+reset. `ry make:2fa` adds TOTP on top — enrolment with a QR code, a challenge
+that holds a signed-in session until it is answered, and single-use recovery
+codes.
 
 `make:auth` works in every web mode and against every database. On `mvc` it
 writes templ pages; on `api`, `react` and `svelte` it writes JSON endpoints
@@ -204,7 +204,10 @@ cannot read the credential, which is not true of a token in local storage. The
 CSRF check therefore looks at the credential rather than the path, and the
 generated API client sends the token.
 
-`make:2fa` still requires `mvc` and SQL.
+`make:2fa` follows the same shape: templ pages on `mvc`, JSON endpoints under
+`/api/two-factor` everywhere else, and the same `twoFactorCore` behind both. On
+a document store the three fields simply appear on the User document, so there
+is no migration to run.
 
 Three decisions are worth knowing, because they are the parts that are easy to
 get subtly wrong:
@@ -295,8 +298,9 @@ combinations is scaffolded into a temporary directory on each CI run and checked
 to build, vet, test and be gofmt-clean, on Linux, macOS and Windows. The
 `make:auth` scaffold gets the same treatment across every web mode on both
 SQLite and MongoDB, and the feature tests it ships run as part of it — so the
-sign-in flow is exercised, not merely compiled. `make:2fa` is covered on SQLite
-and `mvc`, the only combination it supports. This is the test that matters most:
+sign-in flow is exercised, not merely compiled. `make:2fa` gets the same
+treatment, and its feature tests enrol, answer a challenge, spend a recovery
+code and turn the whole thing off again. This is the test that matters most:
 templates are text, so nothing else in the build would catch a broken one.
 
 **Built, and integration-tested against a real server.** MongoDB — the driver,
@@ -316,11 +320,10 @@ but no generator wires it into a project yet. Using it today means writing the
 migration and the routes by hand. It is GORM-only, so MongoDB projects need
 their own token storage.
 
-**Not built.** OAuth and social sign-in. Frontend screens for `make:auth` on
-`react` and `svelte`: the endpoints and their contract are generated, the
-components are not, so the sign-in page itself is still yours to write.
-`make:2fa` on MongoDB or outside `mvc` — it refuses there rather than emit code
-that will not compile.
+**Not built.** OAuth and social sign-in. Frontend screens for `make:auth` and
+`make:2fa` on `react` and `svelte`: the endpoints and their contract are
+generated, the components are not, so the sign-in page and the enrolment screen
+are still yours to write.
 
 ## Development
 

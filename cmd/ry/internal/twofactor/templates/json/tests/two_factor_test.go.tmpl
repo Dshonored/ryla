@@ -1,0 +1,243 @@
+// Feature tests for the two-factor endpoints `ry make:2fa` generated.
+//
+// They drive the real router, so the session, the guard middleware, the sealed
+// secret and the throttle are all in play — which is the only way to find out
+// that an enrolment actually holds up.
+package tests
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"testing"
+
+	rytest "{{.RylaModule}}/testing"
+	"{{.RylaModule}}/twofactor"
+)
+
+// send posts a JSON body from an address of its own.
+//
+// The address matters on the sign-up routes, which are rate-limited per client
+// IP: every test in this file sharing one would make the order they run in
+// decide whether they pass.
+func send(t *testing.T, c *rytest.Client, ip, path string, body any) *rytest.Response {
+	t.Helper()
+
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("encode the request body: %v", err)
+	}
+
+	req := c.Request(http.MethodPost, path, bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = ip + ":54321"
+
+	return c.Do(req)
+}
+
+// account registers a user through the API and signs in as them.
+//
+// Built rather than faked with Login(id): the two-factor flow reads the account
+// out of the database on every request, so a session naming a user who does not
+// exist is simply signed out.
+func account(t *testing.T, ip, email string) (*rytest.Client, string) {
+	t.Helper()
+
+	c := client(t)
+	const password = "correct-horse-battery"
+
+	send(t, c, ip, "/api/auth/register", map[string]string{
+		"name":                  "Someone",
+		"email":                 email,
+		"password":              password,
+		"password_confirmation": password,
+	}).AssertStatus(http.StatusAccepted)
+
+	var signedIn struct {
+		User struct {
+			ID string `json:"id"`
+		} `json:"user"`
+	}
+	send(t, c, ip, "/api/auth/login", map[string]string{
+		"email":    email,
+		"password": password,
+	}).AssertOK().AssertJSON(&signedIn)
+
+	return c, signedIn.User.ID
+}
+
+// signIn returns a second client signed in as an existing account, which is how
+// these tests get a session that has not yet answered the challenge.
+func signIn(t *testing.T, ip, email string) *rytest.Client {
+	t.Helper()
+
+	c := client(t)
+	send(t, c, ip, "/api/auth/login", map[string]string{
+		"email":    email,
+		"password": "correct-horse-battery",
+	}).AssertOK()
+
+	return c
+}
+
+// enrolled takes a signed-in client all the way through enrolment, returning
+// the secret and the recovery codes it was issued.
+func enrolled(t *testing.T, c *rytest.Client, ip string) (secret string, recovery []string) {
+	t.Helper()
+
+	a := application(t)
+
+	var start struct {
+		Secret string `json:"secret"`
+	}
+	send(t, c, ip, "/api/two-factor/setup", nil).AssertOK().AssertJSON(&start)
+
+	if start.Secret == "" {
+		t.Fatal("no secret was issued to enrol with")
+	}
+
+	code, err := twofactor.Code(start.Secret, twofactor.Options{Issuer: a.Config.Name})
+	if err != nil {
+		t.Fatalf("generate a code for the issued secret: %v", err)
+	}
+
+	var confirmed struct {
+		Enabled bool     `json:"enabled"`
+		Codes   []string `json:"recovery_codes"`
+	}
+	send(t, c, ip, "/api/two-factor/setup/confirm", map[string]string{"code": code}).
+		AssertOK().AssertJSON(&confirmed)
+
+	if !confirmed.Enabled {
+		t.Fatal("confirming the enrolment did not turn two-factor authentication on")
+	}
+	if len(confirmed.Codes) == 0 {
+		t.Fatal("no recovery codes were issued, so a lost phone would be a lost account")
+	}
+	return start.Secret, confirmed.Codes
+}
+
+// TestEnrolmentNeedsTheRightCode is the point of the whole flow: a secret that
+// has been shown but not proved does not turn anything on. Enabling on the
+// strength of having generated a QR code would lock out anybody who never
+// managed to scan it.
+func TestEnrolmentNeedsTheRightCode(t *testing.T) {
+	c, _ := account(t, "203.0.113.60", "enrol@example.com")
+
+	send(t, c, "203.0.113.60", "/api/two-factor/setup", nil).AssertOK()
+
+	send(t, c, "203.0.113.60", "/api/two-factor/setup/confirm", map[string]string{"code": "000000"}).
+		AssertStatus(http.StatusUnprocessableEntity)
+
+	var status struct {
+		Enabled bool `json:"enabled"`
+	}
+	c.Get("/api/two-factor").AssertOK().AssertJSON(&status)
+
+	if status.Enabled {
+		t.Error("a rejected code still enabled two-factor authentication")
+	}
+}
+
+// TestTheWholeEnrolmentAndChallenge follows one account from an empty account
+// through enrolment, a fresh session held at the challenge, and back out.
+func TestTheWholeEnrolmentAndChallenge(t *testing.T) {
+	a := application(t)
+
+	const email = "challenge@example.com"
+	c, _ := account(t, "203.0.113.61", email)
+	secret, _ := enrolled(t, c, "203.0.113.61")
+
+	// A fresh session: signed in, but it has not answered the challenge.
+	held := signIn(t, "203.0.113.62", email)
+
+	// The guard holds it, wherever it goes. 403 rather than a redirect, so a
+	// client that parses its responses can tell this apart from being signed
+	// out.
+	held.Get("/api/auth/me").AssertStatus(http.StatusForbidden)
+
+	code, err := twofactor.Code(secret, twofactor.Options{Issuer: a.Config.Name})
+	if err != nil {
+		t.Fatalf("generate a code: %v", err)
+	}
+
+	var passed struct {
+		Passed bool `json:"passed"`
+	}
+	send(t, held, "203.0.113.62", "/api/two-factor", map[string]string{"code": code}).
+		AssertOK().AssertJSON(&passed)
+
+	if !passed.Passed {
+		t.Fatal("answering the challenge did not clear it")
+	}
+
+	// Cleared, so the rest of the application is reachable again.
+	held.Get("/api/auth/me").AssertOK()
+}
+
+// TestARecoveryCodeWorksOnceAndOnlyOnce is the door for a lost phone, and the
+// one credential here that must not survive being used: a code that signed
+// somebody in and stayed valid would be a permanent password.
+func TestARecoveryCodeWorksOnceAndOnlyOnce(t *testing.T) {
+	const email = "recovery@example.com"
+	c, _ := account(t, "203.0.113.63", email)
+	_, recovery := enrolled(t, c, "203.0.113.63")
+
+	held := signIn(t, "203.0.113.64", email)
+	held.Get("/api/auth/me").AssertStatus(http.StatusForbidden)
+
+	var used struct {
+		Passed bool `json:"passed"`
+		Left   int  `json:"recovery_codes_left"`
+	}
+	send(t, held, "203.0.113.64", "/api/two-factor/recovery", map[string]string{"recovery_code": recovery[0]}).
+		AssertOK().AssertJSON(&used)
+
+	if !used.Passed {
+		t.Fatal("a valid recovery code did not clear the challenge")
+	}
+	if used.Left != len(recovery)-1 {
+		t.Errorf("%d codes left, want %d", used.Left, len(recovery)-1)
+	}
+
+	// The same code again, on another session that has not answered.
+	again := signIn(t, "203.0.113.65", email)
+	send(t, again, "203.0.113.65", "/api/two-factor/recovery", map[string]string{"recovery_code": recovery[0]}).
+		AssertStatus(http.StatusUnprocessableEntity)
+}
+
+// TestDisablingNeedsACurrentCode covers the setting that protects every other
+// one. Without a code, anybody who found an unlocked laptop could take the
+// second factor off in a click, which would make it a speed bump.
+func TestDisablingNeedsACurrentCode(t *testing.T) {
+	a := application(t)
+
+	c, _ := account(t, "203.0.113.66", "disable@example.com")
+	secret, _ := enrolled(t, c, "203.0.113.66")
+
+	send(t, c, "203.0.113.66", "/api/two-factor/disable", map[string]string{"code": "000000"}).
+		AssertStatus(http.StatusUnprocessableEntity)
+
+	var stillOn struct {
+		Enabled bool `json:"enabled"`
+	}
+	c.Get("/api/two-factor").AssertOK().AssertJSON(&stillOn)
+	if !stillOn.Enabled {
+		t.Fatal("a rejected code turned two-factor authentication off")
+	}
+
+	code, err := twofactor.Code(secret, twofactor.Options{Issuer: a.Config.Name})
+	if err != nil {
+		t.Fatalf("generate a code: %v", err)
+	}
+
+	var off struct {
+		Enabled bool `json:"enabled"`
+	}
+	send(t, c, "203.0.113.66", "/api/two-factor/disable", map[string]string{"code": code}).
+		AssertOK().AssertJSON(&off)
+
+	if off.Enabled {
+		t.Error("disabling reported it was still on")
+	}
+}

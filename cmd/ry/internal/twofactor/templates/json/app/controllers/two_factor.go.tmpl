@@ -1,0 +1,278 @@
+package controllers
+
+import (
+	"errors"
+	"net/http"
+	"strconv"
+
+	ryauth "{{.RylaModule}}/auth"
+	"{{.RylaModule}}/session"
+	"{{.RylaModule}}/twofactor"
+	"{{.RylaModule}}/validate"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/models"
+	"{{.Module}}/app/requests"
+)
+
+// TwoFactor answers the two-factor endpoints as JSON.
+//
+// It decides nothing. Sealing the secret, spending a recovery code before it
+// lets anybody through, throttling against the account rather than the form —
+// all of that is in twoFactorCore, which the server-rendered pages use too.
+type TwoFactor struct {
+	Base
+	twoFactorCore
+}
+
+// NewTwoFactor builds the controller.
+func NewTwoFactor(a *app.App) *TwoFactor {
+	return &TwoFactor{Base: Base{App: a}, twoFactorCore: newTwoFactorCore(a)}
+}
+
+// Status handles GET /api/two-factor.
+//
+// What a client needs to draw the settings screen, and to know on start-up
+// whether it is being held at a challenge.
+func (c *TwoFactor) Status(w http.ResponseWriter, r *http.Request) {
+	user, err := c.User(r)
+	if err != nil {
+		c.Error(w, r, http.StatusUnauthorized, "Not signed in.")
+		return
+	}
+
+	c.JSON(w, r, http.StatusOK, map[string]any{
+		"enabled":             user.TwoFactorEnabled,
+		"passed":              c.Passed(r),
+		"recovery_codes_left": c.RecoveryCodesLeft(user),
+	})
+}
+
+// StartSetup handles POST /api/two-factor/setup.
+//
+// It answers with the secret in the two forms a client needs: the base32 string
+// to show for typing by hand, and the otpauth URI to turn into a QR code. The
+// image itself has its own endpoint, because a data: URI would put the secret
+// in the browser's history and in the source of any page that rendered it.
+//
+// A POST, not a GET, because it starts something: the first call mints a secret
+// and parks it in the session. Repeating it returns the same one, so refreshing
+// the screen cannot silently invalidate a code somebody is mid-way through
+// scanning.
+func (c *TwoFactor) StartSetup(w http.ResponseWriter, r *http.Request) {
+	user, err := c.User(r)
+	if err != nil {
+		c.Error(w, r, http.StatusUnauthorized, "Not signed in.")
+		return
+	}
+	if user.TwoFactorEnabled {
+		c.Error(w, r, http.StatusConflict,
+			"Two-factor authentication is already on. Turn it off before enrolling again.")
+		return
+	}
+
+	secret, err := c.PendingSecret(r, user)
+	if err != nil {
+		c.twoFactorError(w, r, "start an enrolment", err)
+		return
+	}
+
+	uri, err := twofactor.URI(user.Email, secret, c.opts)
+	if err != nil {
+		c.twoFactorError(w, r, "build the enrolment URI", err)
+		return
+	}
+
+	// no-store on the whole response: the secret is in it.
+	w.Header().Set("Cache-Control", "no-store")
+	c.JSON(w, r, http.StatusOK, map[string]string{
+		"secret":      secret,
+		"otpauth_uri": uri,
+		"qr_code_url": "/api/two-factor/setup/qr.png",
+	})
+}
+
+// SetupQRCode handles GET /api/two-factor/setup/qr.png.
+//
+// The one endpoint here that does not answer JSON, because an <img> tag cannot
+// read one.
+func (c *TwoFactor) SetupQRCode(w http.ResponseWriter, r *http.Request) {
+	user, err := c.User(r)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	png, err := c.QRCode(r, user, 240)
+	if err != nil {
+		c.twoFactorError(w, r, "render the QR code", err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "image/png")
+	// The secret is in this image. A cache anywhere between here and the phone
+	// holding it would be a copy nobody meant to keep.
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(png)
+}
+
+// Enable handles POST /api/two-factor/setup/confirm.
+//
+// The recovery codes come back in this response and in no other. Only their
+// hashes are stored, so there is no endpoint that could reprint them — which is
+// the point, and worth saying plainly in whatever screen shows them.
+func (c *TwoFactor) Enable(w http.ResponseWriter, r *http.Request) {
+	user, form, ok := c.bindCode(w, r)
+	if !ok {
+		return
+	}
+
+	codes, err := c.twoFactorCore.Enable(w, r, user, form.Code)
+	if err != nil {
+		c.refused(w, r, err, "code", "That code is not right. Check your app and try the current one.")
+		return
+	}
+
+	w.Header().Set("Cache-Control", "no-store")
+	c.JSON(w, r, http.StatusOK, map[string]any{
+		"enabled":        true,
+		"recovery_codes": codes,
+	})
+}
+
+// Challenge handles POST /api/two-factor.
+func (c *TwoFactor) Challenge(w http.ResponseWriter, r *http.Request) {
+	user, form, ok := c.bindCode(w, r)
+	if !ok {
+		return
+	}
+
+	if err := c.twoFactorCore.Challenge(w, r, user, form.Code); err != nil {
+		c.refused(w, r, err, "code", "That code is not right. Wait for the next one and try again.")
+		return
+	}
+
+	c.JSON(w, r, http.StatusOK, map[string]any{
+		"passed": true,
+		// Where the client was headed when the challenge interrupted it.
+		"intended": ryauth.Intended(session.From(r.Context()), "/"),
+	})
+}
+
+// Recover handles POST /api/two-factor/recovery.
+func (c *TwoFactor) Recover(w http.ResponseWriter, r *http.Request) {
+	user, err := c.User(r)
+	if err != nil {
+		c.Error(w, r, http.StatusUnauthorized, "Not signed in.")
+		return
+	}
+
+	var form requests.TwoFactorRecovery
+	bag, bindErr := validate.BindAndCheck(r, &form)
+	if bindErr != nil {
+		c.Error(w, r, http.StatusBadRequest, "Could not read the request body.")
+		return
+	}
+	if bag.Any() {
+		c.Invalid(w, r, bag)
+		return
+	}
+
+	left, err := c.twoFactorCore.Recover(w, r, user, form.RecoveryCode)
+	if err != nil {
+		c.refused(w, r, err, "recovery_code",
+			"That recovery code is not one of yours, or it has already been used.")
+		return
+	}
+
+	c.JSON(w, r, http.StatusOK, map[string]any{
+		"passed":              true,
+		"recovery_codes_left": left,
+		"intended":            ryauth.Intended(session.From(r.Context()), "/"),
+	})
+}
+
+// Disable handles POST /api/two-factor/disable.
+func (c *TwoFactor) Disable(w http.ResponseWriter, r *http.Request) {
+	user, form, ok := c.bindCode(w, r)
+	if !ok {
+		return
+	}
+
+	err := c.twoFactorCore.Disable(r, user, form.Code)
+	switch {
+	case errors.Is(err, errNotEnrolled):
+		c.Error(w, r, http.StatusConflict, "Two-factor authentication is not on.")
+		return
+	case err != nil:
+		c.refused(w, r, err, "code", "That code is not right, so nothing has been changed.")
+		return
+	}
+
+	c.JSON(w, r, http.StatusOK, map[string]any{"enabled": false})
+}
+
+// bindCode loads the signed-in account and reads a submitted code, answering
+// the caller itself when either fails.
+func (c *TwoFactor) bindCode(w http.ResponseWriter, r *http.Request) (models.User, requests.TwoFactorCode, bool) {
+	var form requests.TwoFactorCode
+
+	user, err := c.User(r)
+	if err != nil {
+		c.Error(w, r, http.StatusUnauthorized, "Not signed in.")
+		return models.User{}, form, false
+	}
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		c.Error(w, r, http.StatusBadRequest, "Could not read the request body.")
+		return models.User{}, form, false
+	}
+	if bag.Any() {
+		c.Invalid(w, r, bag)
+		return models.User{}, form, false
+	}
+	return user, form, true
+}
+
+// refused turns the flow's refusals into responses.
+//
+// A wrong code and an exhausted budget are different problems that lead to
+// different next steps, so they are different statuses with different messages
+// rather than one flat rejection.
+func (c *TwoFactor) refused(w http.ResponseWriter, r *http.Request, err error, field, wrong string) {
+	var throttled errTooManyAttempts
+
+	switch {
+	case errors.As(err, &throttled):
+		// The header as well as the message, so a client that backs off on its
+		// own has something to read without parsing English.
+		w.Header().Set("Retry-After", strconv.Itoa(int(throttled.RetryAfter.Seconds())+1))
+
+		minutes := int(throttled.RetryAfter.Minutes()) + 1
+		message := "Too many attempts. Try again in about " + strconv.Itoa(minutes) +
+			" minutes, or use a recovery code."
+		WriteError(w, r, http.StatusTooManyRequests, message, fieldBag(field, message))
+
+	case errors.Is(err, errWrongCode):
+		WriteError(w, r, http.StatusUnprocessableEntity, wrong, fieldBag(field, wrong))
+
+	default:
+		c.twoFactorError(w, r, "check the code", err)
+	}
+}
+
+// fieldBag hangs a message on the input that caused it, so a form can put it
+// under that input rather than showing a sentence about the request as a whole.
+func fieldBag(field, message string) validate.ErrorBag {
+	bag := validate.ErrorBag{}
+	bag.Add(field, message)
+	return bag
+}
+
+// twoFactorError logs the detail and tells the client nothing useful to an
+// attacker probing for the difference between a wrong key and a wrong code.
+func (c *TwoFactor) twoFactorError(w http.ResponseWriter, r *http.Request, what string, err error) {
+	c.App.Log.Error("could not "+what, "error", err, "path", r.URL.Path)
+	c.Error(w, r, http.StatusInternalServerError, "Something went wrong.")
+}

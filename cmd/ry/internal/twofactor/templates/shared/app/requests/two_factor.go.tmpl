@@ -7,7 +7,7 @@ package requests
 // different from the sign-in form, where a rule on the password field would
 // tell a guesser which candidates not to bother with.
 type TwoFactorCode struct {
-	Code string `form:"code" validate:"required,min=6,max=8,number"`
+	Code string `form:"code" json:"code" validate:"required,min=6,max=8,number"`
 }
 
 // TwoFactorRecovery is one of the codes issued at enrolment.
@@ -17,6 +17,9 @@ type TwoFactorCode struct {
 // reading a code off a printout may well include the dash, drop it, or type it
 // in lower case. Rejecting any of those here would turn a working recovery code
 // into a lost account.
+// The json tag is not decoration: a JSON body binds by tag and the decoder
+// rejects a field it does not recognise, so without it recovery_code arrives as
+// an unreadable request rather than as a code.
 type TwoFactorRecovery struct {
-	RecoveryCode string `form:"recovery_code" validate:"required,max=64"`
+	RecoveryCode string `form:"recovery_code" json:"recovery_code" validate:"required,max=64"`
 }

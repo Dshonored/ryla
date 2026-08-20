@@ -41,11 +41,31 @@ func TestTwoFactorScaffoldCompiles(t *testing.T) {
 		t.Skip("skipping: the Go toolchain is not on PATH")
 	}
 
+	for _, database := range []string{"sqlite", "mongo"} {
+		for _, web := range []string{"mvc", "api", "react", "svelte"} {
+			t.Run(database+"_"+web, func(t *testing.T) {
+				t.Parallel()
+				buildTwoFactorProject(t, database, web)
+			})
+		}
+	}
+}
+
+// buildTwoFactorProject scaffolds one project, applies make:auth and make:2fa
+// to it, and checks the result compiles, vets, tests and is gofmt-clean.
+func buildTwoFactorProject(t *testing.T, database, web string) {
+	t.Helper()
+
 	ctx := context.Background()
 	root := repoRoot(t)
 	dir := filepath.Join(t.TempDir(), "demo")
 
-	proj, err := scaffold.NewProject("demo", "demo", "sqlite", "mvc", "", "", "dev", goLangVersion(t))
+	lang, css := "", ""
+	if web == "react" || web == "svelte" {
+		lang, css = "ts", "plain"
+	}
+
+	proj, err := scaffold.NewProject("demo", "demo", database, web, lang, css, "dev", goLangVersion(t))
 	if err != nil {
 		t.Fatalf("build project: %v", err)
 	}
@@ -62,7 +82,7 @@ func TestTwoFactorScaffoldCompiles(t *testing.T) {
 	// The same overlays `ry make:auth` would choose, rather than a copy of the
 	// list: two-factor is generated on top of that scaffold, so it has to be
 	// the real one.
-	authOverlays, err := scaffold.AuthOverlays("mvc", "sqlite")
+	authOverlays, err := scaffold.AuthOverlays(web, database)
 	if err != nil {
 		t.Fatalf("choose auth overlays: %v", err)
 	}
@@ -78,9 +98,14 @@ func TestTwoFactorScaffoldCompiles(t *testing.T) {
 		t.Fatalf("render the users migration: %v", err)
 	}
 
+	twoFactorOverlays, err := twofactor.Overlays(web, database)
+	if err != nil {
+		t.Fatalf("choose two-factor overlays: %v", err)
+	}
+
 	twofa := &scaffold.Generator{
 		FS:       twofactor.FS,
-		Overlays: []string{twofactor.OverlayPath},
+		Overlays: twoFactorOverlays,
 		Dest:     dir,
 		Data:     stub,
 	}
@@ -92,13 +117,17 @@ func TestTwoFactorScaffoldCompiles(t *testing.T) {
 		t.Fatal("the two-factor overlay produced no files")
 	}
 
-	columns := stub.WithMigration("add_two_factor_to_users", fixedTime().Add(time.Minute))
-	if err := scaffold.RenderTo(twofactor.FS, twofactor.MigrationPath,
-		filepath.Join(dir, "database", "migrations", columns.ID+".go"), columns, false); err != nil {
-		t.Fatalf("render the two-factor migration: %v", err)
+	// No migration for a document store: the fields appear on the document the
+	// first time one is written with them.
+	if database != "mongo" {
+		columns := stub.WithMigration("add_two_factor_to_users", fixedTime().Add(time.Minute))
+		if err := scaffold.RenderTo(twofactor.FS, twofactor.MigrationPath,
+			filepath.Join(dir, "database", "migrations", columns.ID+".go"), columns, false); err != nil {
+			t.Fatalf("render the two-factor migration: %v", err)
+		}
 	}
 
-	addTwoFactorFieldsToUser(t, ctx, dir)
+	addTwoFactorFieldsToUser(t, ctx, dir, database)
 
 	// Both generators print a line to add rather than editing the route table,
 	// so both lines have to be added here. Without them the scaffolds compile
@@ -110,10 +139,12 @@ func TestTwoFactorScaffoldCompiles(t *testing.T) {
 		"-replace="+scaffold.RylaModule+"="+root,
 		"-require="+scaffold.RylaModule+"@v0.0.0",
 	)
-	run(t, ctx, dir, "go", "get", "-tool", "github.com/a-h/templ/cmd/templ")
-	// The views must exist before tidy: until templ runs, the views package has
-	// no Go files and the controllers importing it cannot resolve.
-	run(t, ctx, dir, "go", "tool", "templ", "generate")
+	if web == "mvc" {
+		run(t, ctx, dir, "go", "get", "-tool", "github.com/a-h/templ/cmd/templ")
+		// The views must exist before tidy: until templ runs, the views package
+		// has no Go files and the controllers importing it cannot resolve.
+		run(t, ctx, dir, "go", "tool", "templ", "generate")
+	}
 	run(t, ctx, dir, "go", "mod", "tidy")
 	run(t, ctx, dir, "go", "build", "./...")
 	run(t, ctx, dir, "go", "vet", "./...")
@@ -124,7 +155,7 @@ func TestTwoFactorScaffoldCompiles(t *testing.T) {
 
 // addTwoFactorFieldsToUser applies by hand what the generator prints, because
 // the generator deliberately does not edit a file the user wrote.
-func addTwoFactorFieldsToUser(t *testing.T, ctx context.Context, dir string) {
+func addTwoFactorFieldsToUser(t *testing.T, ctx context.Context, dir, database string) {
 	t.Helper()
 
 	path := filepath.Join(dir, "app", "models", "user.go")
@@ -133,7 +164,9 @@ func addTwoFactorFieldsToUser(t *testing.T, ctx context.Context, dir string) {
 		t.Fatalf("read the user model: %v", err)
 	}
 
-	const anchor = "\tCreatedAt time.Time"
+	// A field both models declare, and one nothing is inserted after, so the
+	// fields land inside the struct whichever store this is.
+	const anchor = "\tEmailVerifiedAt *time.Time"
 	if !strings.Contains(string(raw), anchor) {
 		t.Fatalf("the user model no longer contains %q, so this test cannot patch it", anchor)
 	}
@@ -141,6 +174,12 @@ func addTwoFactorFieldsToUser(t *testing.T, ctx context.Context, dir string) {
 	fields := "\tTwoFactorSecret string `gorm:\"size:255;not null;default:''\" json:\"-\"`\n" +
 		"\tTwoFactorEnabled bool `gorm:\"not null;default:false\" json:\"-\"`\n" +
 		"\tTwoFactorRecoveryCodes string `gorm:\"size:1024;not null;default:''\" json:\"-\"`\n\n"
+
+	if database == "mongo" {
+		fields = "\tTwoFactorSecret string `bson:\"two_factor_secret\" json:\"-\"`\n" +
+			"\tTwoFactorEnabled bool `bson:\"two_factor_enabled\" json:\"-\"`\n" +
+			"\tTwoFactorRecoveryCodes string `bson:\"two_factor_recovery_codes\" json:\"-\"`\n\n"
+	}
 
 	patched := strings.Replace(string(raw), anchor, fields+anchor, 1)
 	if err := os.WriteFile(path, []byte(patched), 0o644); err != nil {
@@ -266,7 +305,7 @@ func TestEveryTemplateRenders(t *testing.T) {
 
 	// A number rather than "more than zero": an embed directive that silently
 	// stopped matching would leave this passing on whatever survived.
-	if want := 8; rendered != want {
+	if want := 16; rendered != want {
 		t.Errorf("rendered %d templates, want %d — has one been added or dropped without updating this count?", rendered, want)
 	}
 }
