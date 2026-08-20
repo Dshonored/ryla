@@ -39,6 +39,9 @@ type Database struct {
 	// DefaultDSN, so the generated .env works against it untouched.
 	ComposeImage string
 	ComposePort  int
+	// DSNEnv is the variable holding this engine's connection string. MongoDB
+	// is not GORM and reads its own, so the name cannot be assumed.
+	DSNEnv string
 }
 
 // WebMode describes one supported frontend style.
@@ -67,6 +70,7 @@ var databases = []Database{
 		Overlay:      "db/sqlite",
 		DefaultDSN:   "storage/%s.db?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)",
 		MaxOpenConns: 4,
+		DSNEnv:       "DB_DSN",
 		Available:    true,
 		Summary:      "A single file, no server. Pure Go, so the binary still cross-compiles.",
 	},
@@ -79,6 +83,7 @@ var databases = []Database{
 		// The driver's own default. Named MaxOpenConns like the SQL engines
 		// because it is the same knob; MongoDB calls it maxPoolSize.
 		MaxOpenConns: 100,
+		DSNEnv:       "MONGO_URI",
 		Available:    true,
 		Summary:      "Documents rather than rows. No GORM and no migrations: indexes are declared in code.",
 		Server:       true,
@@ -99,6 +104,7 @@ var databases = []Database{
 		// the stock max_connections of 100 with room for a worker, a migration
 		// and a psql session alongside the web process.
 		MaxOpenConns: 25,
+		DSNEnv:       "DB_DSN",
 		Available:    true,
 		Server:       true,
 		ComposeImage: "postgres:17",
@@ -116,6 +122,7 @@ var databases = []Database{
 		// cheaper than Postgres processes and max_connections defaults to 151,
 		// so this is, if anything, conservative.
 		MaxOpenConns: 25,
+		DSNEnv:       "DB_DSN",
 		Available:    true,
 		Server:       true,
 		ComposeImage: "mysql:8",

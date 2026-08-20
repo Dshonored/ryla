@@ -27,6 +27,7 @@ func devCmd() *cobra.Command {
 		debounce   time.Duration
 		strictPort bool
 		noVite     bool
+		full       bool
 	)
 
 	cmd := &cobra.Command{
@@ -43,14 +44,26 @@ instead.
 
 A project with a Vite frontend gets that too: Vite runs alongside, and the Go
 server proxies whatever no route matched to it, so there is still one address to
-open and the frontend keeps its own hot reload.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+open and the frontend keeps its own hot reload.
+
+A database in compose.yaml is started first and waited for, so there is no
+connection refused to decode. ` + "`ry dev full`" + ` starts the rest of the
+development stack with it — redis and mailpit, which ship commented out at the
+bottom of that file.`,
+		Args: onlyFull,
+		RunE: func(cmd *cobra.Command, args []string) error {
 			p, err := currentProject()
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
+
+			// Before anything else that takes time: on a cold start this may
+			// pull an image, and finding that out after Vite has booted and the
+			// first build has finished only wastes the wait.
+			if err := ensureServices(cmd.Context(), p, out, full || len(args) == 1); err != nil {
+				return err
+			}
 
 			// Resolved once, then reused for every restart, so the URL in the
 			// browser stays put across rebuilds.
@@ -58,7 +71,7 @@ open and the frontend keeps its own hot reload.`,
 			if err != nil {
 				return err
 			}
-			args := []string{"serve", "-addr", listenAddr}
+			serveArgs := []string{"serve", "-addr", listenAddr}
 
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -89,7 +102,7 @@ open and the frontend keeps its own hot reload.`,
 
 			r := &watcher.Runner{
 				Project:  p,
-				Args:     args,
+				Args:     serveArgs,
 				Debounce: debounce,
 				Out:      out,
 				Addr:     listenAddr,
@@ -106,7 +119,22 @@ open and the frontend keeps its own hot reload.`,
 	cmd.Flags().DurationVar(&debounce, "debounce", 300*time.Millisecond, "how long to wait for writes to settle")
 	cmd.Flags().BoolVar(&strictPort, "strict-port", false, "fail if the port is taken instead of using the next free one")
 	cmd.Flags().BoolVar(&noVite, "no-vite", false, "do not run the Vite dev server; serve the last frontend build instead")
+	cmd.Flags().BoolVar(&full, "full", false, "start every development service, not only the database")
 	return cmd
+}
+
+// onlyFull accepts `ry dev` and `ry dev full`, and nothing else.
+//
+// The word reads better than the flag for something asked for by name, and both
+// exist because a flag is what everything else in this CLI looks like.
+func onlyFull(_ *cobra.Command, args []string) error {
+	switch {
+	case len(args) == 0:
+		return nil
+	case len(args) == 1 && args[0] == "full":
+		return nil
+	}
+	return fmt.Errorf("unknown argument %q — dev takes \"full\" or nothing", args[0])
 }
 
 // withHint appends a way out to a missing-Node failure. The suggestion differs
@@ -210,6 +238,10 @@ run the binary directly and never need ry installed at all.`,
 				return fmt.Errorf("%s does not exist — run `ry build` first", relativeToWD(bin))
 			}
 
+			if err := ensureServices(cmd.Context(), p, cmd.OutOrStdout(), false); err != nil {
+				return err
+			}
+
 			args := []string{"serve"}
 			if addr != "" {
 				args = append(args, "-addr", addr)
@@ -266,6 +298,13 @@ func passthroughCmds() []*cobra.Command {
 func forward(ctx context.Context, name string, args []string) error {
 	p, err := currentProject()
 	if err != nil {
+		return err
+	}
+
+	// Every one of these boots the application, and the application opens its
+	// database on the way up — `ry routes` fails on a stopped server exactly as
+	// `ry migrate` does.
+	if err := ensureServices(ctx, p, os.Stdout, false); err != nil {
 		return err
 	}
 

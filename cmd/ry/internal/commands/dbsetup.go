@@ -127,27 +127,28 @@ func dbNextSteps(out io.Writer, db scaffold.Database, setup dbSetup, projectName
 	switch setup.Mode {
 	case SetupDocker:
 		fmt.Fprintf(out, `
-%s needs a server, and compose.yaml has one ready. Start it first:
-
-  docker compose up -d
+%s needs a server, and compose.yaml has one ready. `+"`ry dev`"+` and
+`+"`ry migrate`"+` start it for you, so there is nothing to run first.
 `, db.Name)
 		if _, err := exec.LookPath("docker"); err != nil {
 			fmt.Fprintf(out, `
 Docker is not on your PATH yet. Install it from https://docs.docker.com/get-docker/,
-or edit DB_DSN in .env to point at a %s you already have.
-`, db.Name)
+or edit %s in .env to point at a %s you already have.
+`, db.DSNEnv, db.Name)
 		}
 
 	case SetupExternal:
-		fmt.Fprintf(out, "\nUsing the %s you provided. It is in .env as DB_DSN.\n", db.Name)
+		fmt.Fprintf(out, "\nUsing the %s you provided. It is in .env as %s.\n", db.Name, db.DSNEnv)
 
 	case SetupSkip:
 		fmt.Fprintf(out, `
 %s needs a server, and none is configured yet. Before `+"`ry migrate`"+`, either
-point DB_DSN in .env at one you have, or add a container with:
+point %s in .env at one you have, or add a container with:
 
   ry db:compose
-`, db.Name)
+
+which is started for you from then on.
+`, db.Name, db.DSNEnv)
 	}
 }
 
@@ -162,11 +163,9 @@ func composeCmd() *cobra.Command {
 		Long: `Write a compose.yaml holding a development database matching this
 project's configuration.
 
-The credentials match the DSN already in .env, so it works with no further
-setup:
-
-  docker compose up -d
-  ry migrate`,
+The credentials match the DSN already in .env, and ` + "`ry dev`" + ` and
+` + "`ry migrate`" + ` start the container themselves, so writing this file is the
+whole of the setup.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := currentProject()
@@ -190,7 +189,7 @@ setup:
 				return err
 			}
 
-			fmt.Fprintf(out, "Created compose.yaml\n\n  docker compose up -d\n  ry migrate\n")
+			fmt.Fprintf(out, "Created compose.yaml\n\n`ry dev` and `ry migrate` start it from now on.\n")
 			return nil
 		},
 	}

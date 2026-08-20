@@ -1,9 +1,7 @@
 # Development database for {{.Name}}.
 #
-# The connection string in .env matches this, so it works untouched:
-#
-#   docker compose up -d
-#   ry migrate
+# The connection string in .env matches this, and `ry dev` and `ry migrate`
+# start it for you rather than leaving it to be remembered.
 #
 # No authentication, and the port is published on your machine. Local
 # development only.
@@ -21,6 +19,51 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+# ---------------------------------------------------------------------------
+# The rest of the development stack, off until you want it.
+#
+# `ry dev` starts the database alone. Uncomment a service below and
+# `ry dev full` starts it too: the "full" profile is what keeps it out of the
+# plain dev loop, so enabling mailpit does not slow down every rebuild.
+#
+#   redis    what CACHE_DRIVER, SESSION_DRIVER and QUEUE_DRIVER=redis talk to.
+#            .env already points at localhost:6379, so setting those three is
+#            the whole of it.
+#   mailpit  an SMTP server that captures mail rather than delivering it, with
+#            a web inbox on http://localhost:8025. .env already points at port
+#            1025, so set MAIL_DRIVER=smtp and MAIL_ENCRYPTION=none.
+#
+# Neither keeps a volume. A development cache and a development inbox are both
+# meant to be thrown away, and one that survives a restart is a confusing bug
+# rather than a feature.
+#
+# Uncomment from here down.
+#
+#  redis:
+#    image: redis:7-alpine
+#    profiles: ["full"]
+#    restart: unless-stopped
+#    ports:
+#      - "6379:6379"
+#    healthcheck:
+#      test: ["CMD", "redis-cli", "ping"]
+#      interval: 5s
+#      timeout: 5s
+#      retries: 10
+#
+#  mailpit:
+#    image: axllent/mailpit:latest
+#    profiles: ["full"]
+#    restart: unless-stopped
+#    ports:
+#      - "1025:1025"
+#      - "8025:8025"
+#    healthcheck:
+#      test: ["CMD", "/mailpit", "readyz"]
+#      interval: 5s
+#      timeout: 5s
+#      retries: 10
 
 volumes:
   mongo-data:

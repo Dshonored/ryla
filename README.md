@@ -33,6 +33,7 @@ does the same job, and `ry update --self` keeps it current afterwards.
 | --- | --- |
 | `ry new <name>` | Scaffold a project, interactively or from flags |
 | `ry dev` | Watch, rebuild and restart on every save |
+| `ry dev full` | The same, plus every development service in `compose.yaml` |
 | `ry build` | Compile one static binary with views and assets embedded |
 | `ry start` | Run the compiled binary |
 | `ry migrate` | Apply pending migrations |
@@ -53,6 +54,7 @@ does the same job, and `ry update --self` keeps it current afterwards.
 | `ry queue:failed` / `ry queue:retry` | Inspect and requeue exhausted jobs |
 | `ry schedule:run` / `ry schedule:list` | Run or list recurring tasks |
 | `ry db:seed` | Run the database seeders |
+| `ry db:compose` | Write a compose file with a development database |
 | `ry key:generate` | Generate the key that signs cookies |
 | `ry routes` | List named routes |
 | `ry update` | Update the framework version, the CLI, or both |
@@ -68,6 +70,25 @@ system; MongoDB is a document store and has no migrations at all.
 | `postgres` | Transactional DDL: a failed migration leaves nothing half-built. |
 | `mysql` | MariaDB too. DDL commits implicitly, so a failed migration is not rolled back. |
 | `mongo` | Documents rather than rows. Indexes are declared in code; `ry migrate` applies them. |
+
+The three that run as servers ask where that server should be, and the usual
+answer writes a `compose.yaml` whose credentials already match your `.env`.
+From then on `ry dev`, `ry start` and `ry migrate` start that container and wait
+for its health check before connecting, so there is no first command to
+remember and no connection refused to decode.
+
+It stays out of the way when it should: no compose file, or a `DB_DSN` naming a
+host that is not this machine, and nothing happens. `RYLA_NO_DOCKER=1` switches
+it off entirely. `ry db:compose` adds the file later, for a project that chose
+to decide later.
+
+`ry dev full` starts the rest of the development stack with it. That file also
+carries Redis and Mailpit, commented out and tagged with a `full` profile:
+uncomment one and `ry dev full` runs it, while a plain `ry dev` still starts
+only the database, so enabling a mail catcher never slows the rebuild loop. The
+credentials already match `.env` — Redis on 6379, Mailpit's SMTP on 1025 with
+its inbox on 8025 — so `CACHE_DRIVER=redis` or `MAIL_DRIVER=smtp` is the whole
+of the change.
 
 ## Web modes
 
