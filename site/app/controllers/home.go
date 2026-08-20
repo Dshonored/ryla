@@ -2,8 +2,6 @@ package controllers
 
 import (
 	"net/http"
-	"os"
-	"strings"
 
 	"github.com/Dshonored/ryla"
 
@@ -30,26 +28,8 @@ func NewHome(a *app.App) *Home {
 // advertise a release that does not exist, and there is no number to remember
 // to bump. A build from a local checkout reports "dev", which is the truth.
 func (c *Home) Index(w http.ResponseWriter, r *http.Request) {
-	site := views.Site{Version: frameworkVersion(), Repo: "Dshonored/ryla"}
+	site := views.Site{Version: ryla.Version(), Repo: "Dshonored/ryla"}
 	c.Render(w, r, views.Landing(site, batteries, stats, statuses))
-}
-
-// frameworkVersion reports the release the site should advertise.
-//
-// ryla.Version() reads the build info, which is exactly right for an ordinary
-// application — but this site lives in the framework's own repository and
-// builds against the tree beside it through a replace directive, and a replace
-// has no version, so it reports "dev".
-//
-// So CI, which knows the tag it is deploying, passes it in. The value still
-// comes from a git tag rather than from anything typed by hand, and a local
-// build with the variable unset says "dev", which is the truth about a local
-// build.
-func frameworkVersion() string {
-	if v := strings.TrimSpace(os.Getenv("RYLA_VERSION")); v != "" {
-		return v
-	}
-	return ryla.Version()
 }
 
 // What the framework already ships. This is content rather than configuration,
@@ -79,4 +59,3 @@ var statuses = []views.Status{
 	{State: "Less proven", Tone: "#f5b942", What: "Postgres and MySQL compile and vet everywhere, but CI runs no migrations against a live server yet."},
 	{State: "Not built", Tone: "#737373", What: "OAuth and social sign-in. Personal access tokens exist but have no generator wiring them up."},
 }
-

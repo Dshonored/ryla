@@ -37,11 +37,18 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: site/go.sum
 
-      # The site serves the repository's installer at /install.sh. Vendoring it
-      # here is what keeps the two the same file; the test below is what proves
-      # this step actually happened.
-      - name: Vendor the installer
-        run: cp install.sh site/resources/install.sh
+      # The site serves the repository's installer at /install.sh from its own
+      # committed copy. Refreshing it here means a change to the real installer
+      # shows up as a diff rather than as two scripts quietly drifting apart —
+      # and the check below is what fails if nobody committed the refresh.
+      - name: The served installer matches the real one
+        run: |
+          cp install.sh site/resources/install.sh
+          if ! git diff --quiet -- site/resources/install.sh; then
+            echo "::error::site/resources/install.sh is stale. Run 'cp install.sh site/resources/install.sh' and commit it."
+            git diff --stat -- site/resources/install.sh
+            exit 1
+          fi
 
       # Generated views are not committed — the scaffold ignores *_templ.go and
       # regenerates them on every build, so there is no stale-output check to
@@ -73,7 +80,10 @@ jobs:
       - name: Build the image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          # The same context the deploy host uses. The site depends on a
+          # published release of the framework rather than the tree above it,
+          # so it needs nothing outside this directory.
+          context: site
           file: site/Dockerfile
           push: false
           load: true
@@ -90,7 +100,7 @@ jobs:
 
       - name: It serves
         run: |
-          docker run -d --name ryla-site-ci -p 8080:8080 ryla-site:ci
+          docker run -d --name ryla-site-ci -p 8080:8080             -e APP_KEY="base64:$(openssl rand -base64 32)" ryla-site:ci
           for i in $(seq 1 20); do
             if curl -fsS -o /dev/null http://127.0.0.1:8080/up; then
               break
@@ -104,4 +114,8 @@ jobs:
           # The one that would be embarrassing to get wrong: what people pipe
           # into a shell has to be a shell script.
           curl -fsS http://127.0.0.1:8080/install.sh | head -1 | grep -q '^#!/bin/sh'
+          # The version is read from build info, so a page reporting "dev" means
+          # the module resolved to a replace rather than a release.
+          curl -fsS http://127.0.0.1:8080/llms.txt | grep '^Current version:'
+          curl -fsS http://127.0.0.1:8080/llms.txt | grep -q '^Current version: v'             || { echo "::error::the site reports no released version"; exit 1; }
           docker rm -f ryla-site-ci

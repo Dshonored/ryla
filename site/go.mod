@@ -2,13 +2,8 @@ module ryla-site
 
 go 1.25.2
 
-// The site lives in the framework's own repository and documents the
-// framework in this same commit, so it builds against the tree above it
-// rather than a published version that may not be tagged yet.
-replace github.com/Dshonored/ryla => ../
-
 require (
-	github.com/Dshonored/ryla v0.0.0
+	github.com/Dshonored/ryla v0.12.0
 	github.com/a-h/templ v0.3.1020
 	github.com/redis/go-redis/v9 v9.22.0
 	gorm.io/gorm v1.31.2
