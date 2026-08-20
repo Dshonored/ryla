@@ -351,3 +351,12 @@ and a skip is indistinguishable from a pass in the summary line.
 To work on the framework and an app at the same time, put a `go.work` in a
 parent directory joining both, or point `RYLA_PATH` at this checkout — `ry new`
 then wires the generated project to your local tree.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+The license covers the framework and the `ry` command. Code that `ry new`
+writes into your project is yours: the templates are scaffolding, not a
+dependency you inherit terms from, and nothing generated carries a notice back
+to this repository.
