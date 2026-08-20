@@ -13,6 +13,7 @@ import (
 	"github.com/Dshonored/ryla/cmd/ry/internal/project"
 	"github.com/Dshonored/ryla/cmd/ry/internal/scaffold"
 	"github.com/Dshonored/ryla/cmd/ry/internal/templates"
+	"github.com/Dshonored/ryla/cmd/ry/internal/twofactor"
 )
 
 func makeCmds() []*cobra.Command {
@@ -24,8 +25,58 @@ func makeCmds() []*cobra.Command {
 		makeSeederCmd(),
 		makeRequestCmd(),
 		makeAuthCmd(),
+		// Two-factor is built in its own package, with its own embedded
+		// templates, so it is assembled elsewhere and only listed here.
+		twofactor.Command(),
 		makeJobCmd(),
+		makeTestCmd(),
 	}
+}
+
+func makeTestCmd() *cobra.Command {
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:     "make:test <name>",
+		Short:   "Generate a feature test",
+		Example: "  ry make:test Posts",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, stub, err := makeContext(args[0])
+			if err != nil {
+				return err
+			}
+
+			// A document store has no in-process stand-in the way SQLite is one
+			// for a SQL server, so those tests are skipped without a server and
+			// named Live to say so. Nothing else differs between the stubs.
+			tmpl := "make/test.go.tmpl"
+			if isDocumentStore(p) {
+				tmpl = "make/test_mongo.go.tmpl"
+			}
+
+			dest := p.Path("tests", naming.Snake(args[0])+"_test.go")
+			if err := scaffold.RenderTo(templates.FS, tmpl, dest, stub, force); err != nil {
+				return err
+			}
+
+			out := cmd.OutOrStdout()
+			reportCreated(out, p, dest)
+			fmt.Fprintf(out, `
+Run it:
+
+	go test ./tests/ -run %s
+
+The client it drives, and the application behind it, come from
+tests/example_test.go — which builds the app once against a throwaway database
+with the migrations applied.
+`, stub.Pascal)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite an existing file")
+	return cmd
 }
 
 func makeJobCmd() *cobra.Command {

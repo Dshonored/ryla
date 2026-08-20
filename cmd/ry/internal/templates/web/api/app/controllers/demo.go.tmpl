@@ -1,0 +1,83 @@
+package controllers
+
+import (
+	"net/http"
+	"sync/atomic"
+
+	"{{.RylaModule}}/validate"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/requests"
+)
+
+// Demo backs the endpoints under /api/demo: a counter proving the round trip
+// works, and a validated POST showing what a rejected body looks like.
+//
+// It exists to be deleted. Remove this file, app/requests/subscribe.go, and the
+// /api/demo routes in routes/web.go.
+type Demo struct {
+	Base
+
+	// count is atomic because handlers run concurrently: every request is its
+	// own goroutine, so a plain int here would be a data race that only shows
+	// up under load.
+	count atomic.Int64
+}
+
+// NewDemo builds the controller.
+func NewDemo(a *app.App) *Demo {
+	return &Demo{Base: Base{App: a}}
+}
+
+// Counter handles GET and POST /api/demo/counter. GET reports the current
+// value; POST increments it first, so a repeated call does not appear to reset
+// it. The count lives in memory, so it starts again when the process does.
+//
+// Nothing here carries a CSRF token, and it does not need to: /api/ is exempt,
+// which is what lets a client with a bearer token POST straight away.
+func (c *Demo) Counter(w http.ResponseWriter, r *http.Request) {
+	count := c.count.Load()
+	if r.Method == http.MethodPost {
+		count = c.count.Add(1)
+	}
+	c.JSON(w, r, http.StatusOK, map[string]int64{"count": count})
+}
+
+// Reset handles POST /api/demo/counter/reset.
+func (c *Demo) Reset(w http.ResponseWriter, r *http.Request) {
+	c.count.Store(0)
+	c.JSON(w, r, http.StatusOK, map[string]int64{"count": 0})
+}
+
+// Subscribe handles POST /api/demo/subscribe.
+//
+// This is the shape almost every write endpoint takes: bind and validate in one
+// step, then answer with the field messages when it fails. The two failures are
+// kept apart on purpose — a body that is not JSON at all is a 400 the caller
+// fixes in their code, while a missing name is a 422 they fix in their data,
+// and a client that cannot tell them apart will retry the wrong one.
+func (c *Demo) Subscribe(w http.ResponseWriter, r *http.Request) {
+	var body requests.Subscribe
+
+	bag, err := validate.BindAndCheck(r, &body)
+	if err != nil {
+		// The reason is logged rather than returned: it names Go types and
+		// struct fields, which tells a caller about our internals and tells
+		// them nothing they can act on.
+		c.Log(r).Warn("could not read the subscribe body", "error", err)
+		c.Error(w, r, http.StatusBadRequest, "The request body could not be read. Send JSON matching the documented fields.")
+		return
+	}
+
+	if bag.Any() {
+		c.Invalid(w, r, bag)
+		return
+	}
+
+	// 201 rather than 200: a POST that creates something says so, and says
+	// what it created.
+	c.JSON(w, r, http.StatusCreated, map[string]string{
+		"name":  body.Name,
+		"email": body.Email,
+	})
+}

@@ -29,12 +29,52 @@ ry dev
 | `ry migrate` | Apply pending migrations |
 | `ry migrate:rollback` | Undo the last batch |
 | `ry migrate:status` | Show what has run |
+| `ry migrate:refresh` | Roll everything back, then migrate again |
 | `ry make:model <Name>` | Model plus its create-table migration |
 | `ry make:controller <Name>` | Controller, `--resource` for the seven CRUD handlers |
 | `ry make:migration <desc>` | Empty migration |
 | `ry make:middleware <Name>` | HTTP middleware |
+| `ry make:request <Name>` | Validated request type |
 | `ry make:seeder <Name>` | Database seeder |
+| `ry make:job <Name>` | Background job |
+| `ry make:test <Name>` | Feature test through the real router |
+| `ry make:auth` | Registration, sign-in, sign-out, email verification, password reset |
+| `ry make:2fa` | TOTP two-factor: enrolment, challenge and recovery codes |
+| `ry queue:work` | Drain background jobs until interrupted |
+| `ry queue:failed` / `ry queue:retry` | Inspect and requeue exhausted jobs |
+| `ry schedule:run` / `ry schedule:list` | Run or list recurring tasks |
+| `ry db:seed` | Run the database seeders |
+| `ry key:generate` | Generate the key that signs cookies |
 | `ry routes` | List named routes |
+| `ry update` | Update the framework version, the CLI, or both |
+
+## Databases
+
+Pick one with `ry new --db`. The first three are GORM and share the migration
+system; MongoDB is a document store and has no migrations at all.
+
+| `--db` | Notes |
+| --- | --- |
+| `sqlite` | A single file, no server. Pure Go, so the binary still cross-compiles. |
+| `postgres` | Transactional DDL: a failed migration leaves nothing half-built. |
+| `mysql` | MariaDB too. DDL commits implicitly, so a failed migration is not rolled back. |
+| `mongo` | Documents rather than rows. Indexes are declared in code; `ry migrate` applies them. |
+
+## Web modes
+
+Pick one with `ry new --web`.
+
+| `--web` | Notes |
+| --- | --- |
+| `mvc` | Server-rendered pages with templ. Compile-checked views, no JS build step. |
+| `api` | JSON endpoints and no views. The errors are JSON too, 404 and 500 included. |
+| `react` | A React frontend built by Vite and embedded in the binary, JSON behind it. |
+| `svelte` | The same, with Svelte. |
+
+`react` and `svelte` share one Go half: a JSON API plus a handler that proxies
+to Vite while developing and serves the embedded build afterwards. `ry dev`
+runs both on one address, so `fetch("/api/...")` needs no base URL and there is
+no CORS to configure. Node is needed to build the frontend, never to run it.
 
 ## What a project looks like
 
@@ -42,8 +82,11 @@ ry dev
 myapp/
 ├── app/
 │   ├── controllers/     handlers, embedding a Base with render helpers
-│   ├── models/          GORM models
+│   ├── models/          GORM models, or document types on MongoDB
 │   ├── middleware/      app-specific middleware
+│   ├── requests/        what a form may contain, and what counts as valid
+│   ├── jobs/            background work, registered from init
+│   ├── schedule/        recurring tasks, declared in Go rather than a crontab
 │   ├── app.go           the App struct — config, log, db, router
 │   └── commands.go      the binary's own serve/migrate/seed commands
 ├── config/config.go     typed settings, read explicitly from the environment
@@ -55,9 +98,65 @@ myapp/
 │   ├── views/           templ components, compiled and type-checked
 │   └── static/          embedded into the binary
 ├── routes/web.go        the route table, written by hand
+├── tests/               feature tests through the real router
 ├── cmd/app/main.go      wiring: build the app, register routes, run
 └── ryla.yaml            manifest ry reads to build and run the project
 ```
+
+That is the `mvc` shape. `react` and `svelte` replace `resources/` with a Vite
+application in `resources/frontend`; `api` has no `resources/` at all. MongoDB
+projects have no `database/migrations`, and declare indexes on the models
+instead.
+
+## Authentication
+
+`ry make:auth` writes the whole flow as ordinary code you own: a User model and
+its migration, registration, sign-in, sign-out, email verification and password
+reset. `ry make:2fa` adds TOTP on top — an enrolment page with a QR code, a
+challenge that holds a signed-in session until it is answered, and single-use
+recovery codes.
+
+Both generate server-rendered pages against GORM, so both require the `mvc` web
+mode and a SQL database. They refuse rather than write files that would not
+compile.
+
+Three decisions are worth knowing, because they are the parts that are easy to
+get subtly wrong:
+
+- A wrong password and an unknown email produce the same message, and the
+  unknown-email path still runs a hash, so neither the wording nor the timing
+  says whether an address is registered.
+- Registration answers "check your inbox" either way and puts the difference in
+  the email. That is also why it does not sign you in: doing so would make a new
+  address observably different from an existing one.
+- `auth.Login` regenerates the session id, which is what closes session
+  fixation. Sessions live in the store rather than the cookie, so they can be
+  revoked.
+
+For API and mobile clients, the `bearer` package authenticates from an
+`Authorization: Bearer` header against personal access tokens stored as SHA-256
+digests, with scopes, expiry and immediate revocation. The plaintext exists once,
+when the token is created; nothing stores it, so a settings page can list a
+user's tokens but never show them again. It is built on GORM, and there is no
+generator for it yet — see Status below.
+
+## Testing
+
+The `testing` package (imported as `rytest`) drives the real application rather
+than calling handler functions:
+
+```go
+client(t).LoginID(user.ID).Get("/posts").AssertOK().AssertContains("First post")
+```
+
+`rytest.Env` points the process at a throwaway in-memory SQLite database and a
+configuration safe to test against; `rytest.Migrate` applies the migrations;
+`rytest.New` returns a client with its own cookie jar that attaches the CSRF
+token to every unsafe request. Assertions print the response body when they
+fail, which is usually the whole diagnosis.
+
+Generated projects ship a `tests/example_test.go` wired up this way, and
+`ry make:test Posts` adds more.
 
 ## Design decisions
 
@@ -92,15 +191,47 @@ server needs no Go toolchain and no `ry`:
 
 ## Status
 
-Working today: project scaffolding, routing, middleware, config, logging, GORM
-with SQLite, versioned migrations, templ views, embedded assets, the code
-generators, and the `dev`/`build`/`start` loop.
+Ryla is pre-1.0. Everything below exists and builds, so the headings sort by how
+well it is actually tested rather than by whether it is finished — "it compiles"
+and "it works" are not the same claim, and this section is only useful if it
+keeps them apart.
 
-Planned, roughly in this order: request validation and CSRF, authentication
-(sessions, then API tokens, OAuth and 2FA), queues, mail, cache, scheduler, then
-the remaining database and web-mode overlays — Postgres and MySQL, and API,
-React and Svelte front ends. `ry new` already lists those options and tells you
-plainly which are not built yet.
+**Built, and unit-tested in process.** Routing, middleware, typed config,
+logging, request validation, CSRF, flash messages, signed cookies, sessions,
+password authentication, rate limiting, mail, signed links, background jobs,
+cache, the scheduler, migrations, personal access tokens, TOTP two-factor, the
+testing helpers, the generators, and the `dev`/`build`/`start` loop. The Redis
+drivers for cache, sessions and the queue are tested against an in-process
+server speaking the real protocol, so the actual client and Lua scripts run.
+
+**Built, and covered end to end.** Every one of the sixteen database × web-mode
+combinations is scaffolded into a temporary directory on each CI run and checked
+to build, vet, test and be gofmt-clean, on Linux, macOS and Windows. The
+`make:auth` and `make:2fa` scaffolds get the same treatment, on SQLite and
+`mvc`, which is the only combination they support. This is the test that matters
+most: templates are text, so nothing else in the build would catch a broken one.
+
+**Built, and integration-tested against a real server.** MongoDB — the driver,
+and the cache, session and queue stores built on it — runs against a `mongo:7`
+service container in CI.
+
+**Built, but not integration-tested in CI.** Postgres and MySQL. Both are
+exercised by the scaffold tests, so the generated project and its shipped
+migrations compile and vet, and `db/schema_live_test.go` will run the migrations
+against a real server when `POSTGRES_TEST_DSN` or `MYSQL_TEST_DSN` is set — but
+CI does not set them, so on CI nothing runs those migrations. Treat the two
+engines as working but less proven than SQLite and MongoDB.
+
+**Built, but not scaffolded.** The `bearer` package (personal access tokens) is
+implemented and unit-tested, and there is a migration template for the table,
+but no generator wires it into a project yet. Using it today means writing the
+migration and the routes by hand. It is GORM-only, so MongoDB projects need
+their own token storage.
+
+**Not built.** OAuth and social sign-in. `make:auth` and `make:2fa` on MongoDB
+or on the `api`, `react` and `svelte` web modes — the generators refuse there
+rather than emit code that will not compile, so authentication in those projects
+is currently hand-written.
 
 ## Development
 
@@ -112,6 +243,18 @@ The test that matters most scaffolds every database × web-mode combination into
 a temporary directory and checks the result builds, vets and is gofmt-clean. A
 scaffolder that emits code which does not compile is worse than no scaffolder,
 and because templates are text, nothing else in the build would catch it.
+
+Integration tests skip unless they are pointed at a server, and are named
+`TestLive...` so they can be selected on their own:
+
+```bash
+MONGO_TEST_URI=mongodb://localhost:27017 \
+  go test ./mongo/ ./cache/mongo/ ./session/mongo/ ./queue/mongo/ -run Live -v
+POSTGRES_TEST_DSN='postgres://...' go test ./db/ -run Live -v
+```
+
+Use `-run Live -v` when you want proof they ran: a missing variable is a skip,
+and a skip is indistinguishable from a pass in the summary line.
 
 To work on the framework and an app at the same time, put a `go.work` in a
 parent directory joining both, or point `RYLA_PATH` at this checkout — `ry new`

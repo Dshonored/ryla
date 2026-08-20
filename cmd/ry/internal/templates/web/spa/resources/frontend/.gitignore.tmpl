@@ -1,0 +1,13 @@
+# Vite writes its build into dist/, and resources/embed.go compiles that whole
+# directory into the binary. It is generated output rather than source, so it
+# is not committed — but the directory itself has to survive, because an embed
+# directive that matches nothing is a compile error and a fresh clone would
+# then need Node before it could build any Go at all.
+dist/*
+!dist/.gitkeep
+
+node_modules/
+
+# Vite's own caches.
+.vite/
+*.local

@@ -1,0 +1,49 @@
+# {{.Name}} — frontend
+
+A React application built by [Vite](https://vite.dev). It is the whole of this
+project's user interface; the Go side is a JSON API.
+
+## You do not run this directly
+
+```bash
+ry dev     # starts the Go server and Vite together
+ry build   # compiles this into dist/, then embeds dist/ in the binary
+```
+
+`ry dev` starts Vite on a port of its own and the Go server proxies everything
+it did not route to it, so there is one address to open — the one `ry dev`
+prints. Editing a file under `src/` updates the running page without a reload;
+editing a `.go` file rebuilds the server and reloads the browser.
+
+The scripts in `package.json` still work if you want Vite on its own
+(`npm run dev`), but calls to `/api` will 404: nothing is behind it then.
+
+## How it reaches the API
+
+Same origin, absolute paths, no base URL:
+
+```js
+import { get, post } from "./api.js";
+
+const service = await get("/api");
+```
+
+`/api` is exempt from CSRF checks, which is why `api.js` sends no token. Add
+your endpoints under that prefix in `routes/web.go` and they inherit the same
+treatment.
+
+## The build is embedded
+
+`vite build` writes `dist/`, and `resources/embed.go` compiles that directory
+into the Go binary. Deployment stays one file with nothing beside it — which is
+the reason this framework is written in Go, and the reason `dist/` must keep
+existing even when empty. The `.gitkeep` inside it is load-bearing: an embed
+directive that matches nothing will not compile, and without it a clone with no
+Node installed could not build the Go code at all.
+
+## Dependencies
+
+```bash
+npm install          # `ry dev` and `ry build` do this for you on the first run
+npm outdated         # what has moved on
+```

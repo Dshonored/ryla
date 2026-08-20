@@ -1,0 +1,133 @@
+package controllers
+
+import (
+	"fmt"
+	"net/http"
+	"runtime/debug"
+
+	"{{.RylaModule}}/middleware"
+	"{{.RylaModule}}/validate"
+
+	"{{.Module}}/app"
+)
+
+// ErrorResponse is the body of every failing response.
+//
+// The detail is wrapped in a single "error" key so a consumer can tell a
+// failure from a success by shape as well as by status code. That matters for
+// the generated clients and command-line tools that hand you a decoded body
+// and nothing else.
+type ErrorResponse struct {
+	Error ErrorDetail `json:"error"`
+}
+
+// ErrorDetail describes one failure.
+type ErrorDetail struct {
+	// Message is written for a person: a developer reading a log, or someone
+	// pasting it into a bug report.
+	Message string `json:"message"`
+
+	// Status repeats the HTTP status. Redundant over the wire, and worth it:
+	// bodies get logged, forwarded and stored without their response, and one
+	// that cannot say what went wrong on its own is much less useful then.
+	Status int `json:"status"`
+
+	// Fields carries the messages for a rejected body, keyed by the field name
+	// the request itself used, so a client can put each message next to the
+	// input that caused it without a translation table.
+	Fields validate.ErrorBag `json:"fields,omitempty"`
+
+	// RequestID matches the X-Request-Id header on the same response, which is
+	// what turns "it failed for me at about four" into one line in the log.
+	RequestID string `json:"request_id,omitempty"`
+
+	// Detail is filled in only when APP_DEBUG is on. It carries the internal
+	// reason, which is exactly what an attacker would like to be told.
+	Detail string `json:"detail,omitempty"`
+}
+
+// WriteError sends a failure in the standard shape.
+//
+// Exported so that anything answering outside a controller — the not-found
+// handler, the recovery middleware — answers identically. An API whose errors
+// change shape depending on which layer produced them cannot be handled in one
+// place by the client.
+func WriteError(w http.ResponseWriter, r *http.Request, status int, message string, fields validate.ErrorBag) {
+	writeJSON(w, r, status, ErrorResponse{Error: ErrorDetail{
+		Message:   message,
+		Status:    status,
+		Fields:    fields,
+		RequestID: middleware.RequestIDFrom(r.Context()),
+	}})
+}
+
+// Errors answers the failures that no handler is reached for: an unknown path,
+// a method the path does not accept, and a panic on the way through.
+type Errors struct {
+	Base
+}
+
+// NewErrors builds the controller.
+func NewErrors(a *app.App) *Errors {
+	return &Errors{Base{App: a}}
+}
+
+// NotFound handles any path that matches no route.
+//
+// The path is echoed back because a 404 from an API is nearly always a typo or
+// a stale client, and saying which path was asked for saves the caller
+// guessing whether the request even arrived as they meant it.
+func (c *Errors) NotFound(w http.ResponseWriter, r *http.Request) {
+	c.Error(w, r, http.StatusNotFound, fmt.Sprintf("No endpoint matches %s %s.", r.Method, r.URL.Path))
+}
+
+// MethodNotAllowed handles a known path asked for with the wrong method.
+func (c *Errors) MethodNotAllowed(w http.ResponseWriter, r *http.Request) {
+	c.Error(w, r, http.StatusMethodNotAllowed, fmt.Sprintf("%s is not allowed on %s.", r.Method, r.URL.Path))
+}
+
+// Recover turns a panic into a JSON 500.
+//
+// The framework's own recovery answers text/plain, which is right for a page
+// and wrong here. This is registered last in routes.Register so that it sits
+// closest to the handlers and sees their panics first; the framework's stays
+// underneath as the backstop for anything that fails further out.
+func (c *Errors) Recover(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			rec := recover()
+			if rec == nil {
+				return
+			}
+			// A client disconnecting mid-write is normal rather than a crash,
+			// and net/http knows to stay quiet about it. Let it travel on.
+			if rec == http.ErrAbortHandler {
+				panic(rec)
+			}
+
+			c.Log(r).Error("panic recovered",
+				"error", rec,
+				"method", r.Method,
+				"path", r.URL.Path,
+				"stack", string(debug.Stack()),
+			)
+
+			detail := ""
+			if c.App.Config.Debug {
+				// The panic value but never the stack: the stack is already in
+				// the log, where it is readable, and a response body that a
+				// client may store or forward is the wrong place for one.
+				detail = fmt.Sprintf("panic: %v", rec)
+			}
+
+			writeJSON(w, r, http.StatusInternalServerError, ErrorResponse{Error: ErrorDetail{
+				Message:   "Internal Server Error",
+				Status:    http.StatusInternalServerError,
+				RequestID: middleware.RequestIDFrom(r.Context()),
+				Detail:    detail,
+			}})
+		}()
+
+		next.ServeHTTP(w, r)
+	})
+}

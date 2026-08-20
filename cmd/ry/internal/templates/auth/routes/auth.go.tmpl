@@ -33,6 +33,12 @@ func RegisterAuth(a *app.App) {
 		// what signs the new account in.
 		r.Get("/verify", auth.Verify).Name("verify")
 
+		r.Get("/forgot-password", auth.ShowForgotPassword).Name("password.request")
+		// Guests only, like the rest of this group: somebody already signed in
+		// changes their password from their account page, where the current
+		// one can be asked for, rather than through a link from a mailbox.
+		r.Get("/reset-password", auth.ShowResetPassword).Name("password.reset")
+
 		// Only the submissions are throttled.
 		//
 		// Counting page views too would lock someone out of even seeing the
@@ -57,6 +63,12 @@ func RegisterAuth(a *app.App) {
 
 			r.Post("/register", auth.Register).Name("register.store")
 			r.Post("/login", auth.Login).Name("login.store")
+
+			// The forgot form sends an email to any address handed to it, so
+			// unthrottled it is a way to have this application post mail at
+			// somebody else's inbox all day.
+			r.Post("/forgot-password", auth.ForgotPassword).Name("password.email")
+			r.Post("/reset-password", auth.ResetPassword).Name("password.update")
 		})
 	})
 

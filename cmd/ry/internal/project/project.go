@@ -14,6 +14,11 @@ import (
 // ManifestName is the file that marks the root of a Ryla project.
 const ManifestName = "ryla.yaml"
 
+// DefaultFrontend is where the web modes that use Vite put package.json. It
+// sits under resources/ because the build output has to live inside the Go
+// package that embeds it, and embed cannot reach outside its own directory.
+const DefaultFrontend = "resources/frontend"
+
 // ErrNotFound is returned when no manifest exists in the current directory or
 // any parent.
 var ErrNotFound = errors.New("not inside a Ryla project (no " + ManifestName + " found)")
@@ -29,6 +34,15 @@ type Manifest struct {
 		Main   string `yaml:"main"`
 		Output string `yaml:"output"`
 		Templ  bool   `yaml:"templ"`
+
+		// Vite marks a project whose frontend is compiled by Vite: `ry dev`
+		// runs the dev server beside the application and `ry build` compiles
+		// the frontend before the Go build embeds it.
+		Vite bool `yaml:"vite"`
+
+		// Frontend is the directory holding package.json, relative to the
+		// project root. It is only read when Vite is set.
+		Frontend string `yaml:"frontend"`
 	} `yaml:"build"`
 
 	Dev struct {
@@ -100,6 +114,15 @@ func (p *Project) applyDefaults() {
 	if p.Build.Output == "" {
 		p.Build.Output = filepath.Base(p.Root)
 	}
+	if p.Build.Vite && p.Build.Frontend == "" {
+		p.Build.Frontend = DefaultFrontend
+	}
+}
+
+// FrontendDir is the absolute path of the directory holding package.json. It is
+// only meaningful when Build.Vite is set.
+func (p *Project) FrontendDir() string {
+	return p.Path(filepath.FromSlash(p.Build.Frontend))
 }
 
 // BinaryName returns the output binary name with the platform's executable

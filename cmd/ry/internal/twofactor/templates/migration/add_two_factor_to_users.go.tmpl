@@ -1,0 +1,100 @@
+package migrations
+
+import (
+	"fmt"
+
+	"gorm.io/gorm"
+
+	"{{.RylaModule}}/migrate"
+)
+
+func init() {
+	migrate.Register("{{.ID}}", up{{.Version}}, down{{.Version}})
+}
+
+// user{{.Version}} is the part of the users table this migration touches. It is
+// a copy rather than a reference to models.User, so a later change to the model
+// cannot silently rewrite what this migration does.
+type user{{.Version}} struct {
+	ID uint `gorm:"primaryKey"`
+
+	// TwoFactorSecret holds the TOTP shared secret sealed with the application
+	// key — never the secret itself.
+	//
+	// It cannot be hashed the way the password column is: the server recomputes
+	// the codes from it on every sign-in, so it has to be recoverable. Stored in
+	// the clear it would be worth exactly as much to whoever steals this table
+	// as it is to the user, which would leave two-factor authentication
+	// defending against everyone except the attacker it was added for — the one
+	// who already has the password column.
+	//
+	// So the framework encrypts it with AES-256-GCM under a key derived from
+	// APP_KEY, which lives in the environment and not in here. A dump of this
+	// table is then inert on its own. The consequence to know about: rotating
+	// APP_KEY locks every enrolled user out of their second factor, so a
+	// rotation has to re-seal these values, not just replace the key.
+	//
+	// Not null with an empty default, rather than nullable, so that "has no
+	// second factor" is one value in the column instead of two.
+	TwoFactorSecret string `gorm:"column:two_factor_secret;size:255;not null;default:''"`
+
+	// TwoFactorEnabled is what the sign-in path reads. It is separate from the
+	// secret because a secret exists briefly before it has been confirmed, and
+	// turning the flag on early would lock a user out on a QR code they never
+	// managed to scan.
+	TwoFactorEnabled bool `gorm:"column:two_factor_enabled;not null;default:false"`
+
+	// TwoFactorRecoveryCodes holds one hash per unused code, newline separated.
+	// Hashes, because these are credentials; a plain SHA-256 rather than
+	// argon2id, because a recovery code is fifty bits the framework generated
+	// and has no dictionary behind it to slow down.
+	//
+	// A kilobyte is room for roughly twenty codes at forty-three characters
+	// each. Widen it before issuing more than that.
+	TwoFactorRecoveryCodes string `gorm:"column:two_factor_recovery_codes;size:1024;not null;default:''"`
+}
+
+func (user{{.Version}}) TableName() string { return "users" }
+
+// twoFactorColumns{{.Version}} is the set this migration owns, in one place so
+// that up and down cannot drift apart.
+var twoFactorColumns{{.Version}} = []string{
+	"TwoFactorSecret",
+	"TwoFactorEnabled",
+	"TwoFactorRecoveryCodes",
+}
+
+func up{{.Version}}(tx *gorm.DB) error {
+	m := tx.Migrator()
+
+	for _, column := range twoFactorColumns{{.Version}} {
+		// Skipped rather than failed, so a half-applied run — a migration that
+		// added two columns and then lost the connection — can be finished by
+		// running it again.
+		if m.HasColumn(&user{{.Version}}{}, column) {
+			continue
+		}
+		if err := m.AddColumn(&user{{.Version}}{}, column); err != nil {
+			return fmt.Errorf("migrations: adding %s to users: %w", column, err)
+		}
+	}
+	return nil
+}
+
+// down{{.Version}} drops the columns, which throws away every enrolled secret
+// and every unused recovery code in the process. There is no way to keep them:
+// the columns are where they live. Rolling this back means every user enrols
+// again.
+func down{{.Version}}(tx *gorm.DB) error {
+	m := tx.Migrator()
+
+	for _, column := range twoFactorColumns{{.Version}} {
+		if !m.HasColumn(&user{{.Version}}{}, column) {
+			continue
+		}
+		if err := m.DropColumn(&user{{.Version}}{}, column); err != nil {
+			return fmt.Errorf("migrations: dropping %s from users: %w", column, err)
+		}
+	}
+	return nil
+}

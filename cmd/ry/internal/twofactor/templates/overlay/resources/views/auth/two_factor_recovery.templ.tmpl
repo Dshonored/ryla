@@ -1,0 +1,41 @@
+package auth
+
+import "{{.Module}}/resources/views"
+
+// TwoFactorRecoveryCodesForm carries the freshly issued codes.
+//
+// This is the only page in the application that will ever hold them. What is
+// stored is a hash of each one, so there is no "show me my codes again" — by
+// design, because a page that could reprint them would be a page that hands the
+// account to anyone who borrows an open browser.
+type TwoFactorRecoveryCodesForm struct {
+	Codes []string
+}
+
+templ TwoFactorRecoveryCodes(form TwoFactorRecoveryCodesForm) {
+	@views.Layout("Save your recovery codes") {
+		<div class="stack auth-card">
+			<header class="stack-sm">
+				<h1>Save your recovery codes</h1>
+				<p class="muted small">
+					Two-factor authentication is on. Keep these somewhere that is
+					not the phone holding your authenticator app — they are what
+					gets you back in if you lose it.
+				</p>
+				<p class="muted small">
+					Each code works once. This page will not be shown again.
+				</p>
+			</header>
+
+			<ul class="stack-sm">
+				for _, code := range form.Codes {
+					<li><code>{ code }</code></li>
+				}
+			</ul>
+
+			<div>
+				<a class="btn" href="/">I have saved them</a>
+			</div>
+		</div>
+	}
+}

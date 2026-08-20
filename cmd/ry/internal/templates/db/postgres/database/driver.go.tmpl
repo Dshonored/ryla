@@ -1,0 +1,26 @@
+// Package database selects the SQL driver this project was generated for.
+//
+// Importing it registers the dialect with the framework's db package. Only the
+// chosen driver is linked into the binary, so a Postgres build carries no
+// SQLite or MySQL code.
+package database
+
+import (
+	// Registers the "postgres" dialect. The framework's driver reaches the
+	// server through pgx rather than libpq, so this build needs no CGO and
+	// still cross-compiles to a single static binary.
+	_ "{{.RylaModule}}/db/postgres"
+)
+
+// Driver is the dialect name used in configuration.
+const Driver = "postgres"
+
+// DefaultDSN points at a local server with the stock superuser.
+//
+// sslmode is spelled out rather than left to the driver's default, which
+// negotiates TLS and quietly falls back: a development server with no
+// certificate then connects or not depending on how it happens to be built,
+// which is a bad thing to discover from a connection error. A hosted database
+// hands out a URL carrying sslmode=require, and pasting that over this line is
+// the whole of the change.
+const DefaultDSN = {{.DefaultDSN | quote}}

@@ -1,0 +1,64 @@
+// Package routes declares the application's HTTP routes.
+//
+// Routes are written by hand and never rewritten by a generator, so this file
+// stays a reliable table of contents for the application. `ry make:controller`
+// prints the lines to add rather than editing this file behind your back.
+package routes
+
+import (
+	"net/http"
+	"strings"
+
+	"{{.RylaModule}}/router"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/controllers"
+)
+
+// APIPrefix is where everything this server answers itself lives. It is a
+// constant because two decisions depend on it: the CSRF middleware skips it,
+// and anything outside it belongs to the frontend.
+const APIPrefix = "/api/"
+
+// Register attaches every route to the application's router.
+func Register(a *app.App) {
+	home := controllers.NewHome(a)
+	demo := controllers.NewDemo(a)
+	errs := controllers.NewErrors(a)
+	front := controllers.NewFrontend(a)
+
+	// Recover is added here, after app.New has built the middleware stack, so
+	// it ends up innermost and sees a handler's panic before the framework's
+	// text/plain recovery does.
+	a.Router.Use(errs.Recover)
+	a.Router.MethodNotAllowed(errs.MethodNotAllowed)
+
+	// Anything no route matched. Under /api that is a client asking for an
+	// endpoint this server does not have, and it gets the same JSON shape as
+	// every other failure. Everywhere else it is a page: the browser's routes
+	// live in the frontend and this server has never heard of them, so it hands
+	// over the application shell and lets it decide.
+	a.Router.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, APIPrefix) {
+			errs.NotFound(w, r)
+			return
+		}
+		front.Handle(w, r)
+	})
+
+	// Outside /api because it is polled by deployment tooling that should not
+	// have to know how this application arranges its endpoints.
+	a.Router.Get("/up", home.Health).Name("health")
+
+	a.Router.Route("/api", func(r *router.Router) {
+		r.Get("/", home.Index).Name("index")
+
+		// The demo the welcome page is built from. Delete this block along with
+		// app/controllers/demo.go, app/requests/subscribe.go and the frontend's
+		// own demo components once you have endpoints of your own.
+		r.Get("/demo/counter", demo.Counter).Name("demo.counter")
+		r.Post("/demo/counter", demo.Counter).Name("demo.counter.increment")
+		r.Post("/demo/counter/reset", demo.Reset).Name("demo.counter.reset")
+		r.Post("/demo/subscribe", demo.Subscribe).Name("demo.subscribe")
+	})
+}

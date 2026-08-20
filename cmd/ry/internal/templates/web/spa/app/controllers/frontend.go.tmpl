@@ -1,0 +1,203 @@
+package controllers
+
+import (
+	"io/fs"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"os"
+	"path"
+	"strings"
+
+	"{{.Module}}/app"
+	"{{.Module}}/resources"
+)
+
+// DevServerEnv names the variable `ry dev` sets to the address of the Vite
+// server it started. Nothing else ever sets it, which is what makes the two
+// behaviours below a property of how the process was launched rather than of
+// how it was built: the binary you ship has no idea Vite exists.
+const DevServerEnv = "RYLA_VITE_URL"
+
+// Frontend serves the single-page application.
+//
+// Two modes, decided once at start-up. While developing, every request no route
+// claimed is proxied to Vite — the page, its modules and its hot-reload socket
+// all arrive from this origin, so there is one address to open and the frontend
+// keeps its own reloading. In production the same requests are answered from
+// the build embedded in the binary.
+type Frontend struct {
+	Base
+
+	handler http.Handler
+}
+
+// NewFrontend builds the controller, resolving which of the two modes applies.
+// Resolved here rather than per request: the answer cannot change while the
+// process runs, and a proxy rebuilt on every request would drop its connection
+// pool each time.
+func NewFrontend(a *app.App) *Frontend {
+	return &Frontend{Base: Base{App: a}, handler: frontendHandler(a)}
+}
+
+// Handle serves whatever the router did not match.
+func (c *Frontend) Handle(w http.ResponseWriter, r *http.Request) {
+	c.handler.ServeHTTP(w, r)
+}
+
+// frontendHandler picks between the dev proxy and the embedded build.
+func frontendHandler(a *app.App) http.Handler {
+	target := strings.TrimSpace(os.Getenv(DevServerEnv))
+	if target == "" {
+		if !resources.Built() {
+			a.Log.Warn("the frontend has not been built; serving a placeholder page",
+				"fix", "ry build")
+			return http.HandlerFunc(notBuilt)
+		}
+		return embedded(resources.Dist())
+	}
+
+	u, err := url.Parse(target)
+	if err != nil {
+		// Falling back rather than failing: a mistyped address is a broken dev
+		// setup, not a reason for the API to stop answering.
+		a.Log.Error("could not parse the dev server address; serving the embedded frontend instead",
+			"env", DevServerEnv, "value", target, "error", err)
+		return embedded(resources.Dist())
+	}
+
+	a.Log.Info("proxying the frontend to the Vite dev server", "url", u.String())
+	return viteProxy(a, u)
+}
+
+// viteProxy forwards a request to the Vite dev server.
+func viteProxy(a *app.App, target *url.URL) http.Handler {
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+			// Vite generates absolute URLs for its client script and for the
+			// hot-reload socket, and they have to point at the address the
+			// browser actually used. Keeping the inbound Host is what makes
+			// them come back through this server rather than skipping past it.
+			pr.Out.Host = pr.In.Host
+		},
+
+		// Flush every write straight through. The hot-reload channel is a
+		// stream that never ends, so anything held in a buffer waiting for more
+		// output would arrive only once the next change happened to push it.
+		FlushInterval: -1,
+
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			// Ordinary during start-up: the dev server takes a moment to bind,
+			// and `ry dev` deliberately does not wait for it. Logged at debug
+			// so a genuinely dead Vite is still findable without a wall of
+			// warnings for the first second of every session.
+			a.Log.Debug("the Vite dev server did not answer", "path", r.URL.Path, "error", err)
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(devServerDown))
+		},
+	}
+	return proxy
+}
+
+// embedded serves the compiled frontend.
+//
+// A path that names a file gets that file. Anything else gets index.html, which
+// is what makes the browser's own routes work: /settings exists only inside the
+// application's JavaScript, so the server has to hand over the shell and let it
+// decide. A request that looks like a missing asset is answered 404 instead —
+// returning HTML for a stylesheet only produces a baffling console error.
+func embedded(dist fs.FS) http.Handler {
+	files := http.FileServerFS(dist)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if name == "" || name == "." {
+			serveIndex(w, r, dist)
+			return
+		}
+
+		if _, err := fs.Stat(dist, name); err == nil {
+			files.ServeHTTP(w, r)
+			return
+		}
+
+		if path.Ext(name) != "" {
+			http.NotFound(w, r)
+			return
+		}
+		serveIndex(w, r, dist)
+	})
+}
+
+// serveIndex sends the application shell.
+func serveIndex(w http.ResponseWriter, r *http.Request, dist fs.FS) {
+	body, err := fs.ReadFile(dist, "index.html")
+	if err != nil {
+		notBuilt(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The shell names hashed asset files, so caching it would pin the
+	// application to the version a visitor first loaded.
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(body)
+}
+
+// notBuilt answers when the binary carries no frontend, which is the state of a
+// fresh clone: the Go code compiles without Node, deliberately, so the first
+// run has to explain the missing half rather than answering a bare 404.
+//
+// It is a 200 on purpose. A 5xx would let a browser or a proxy replace this
+// page with its own error, and the message naming the fix is the entire value
+// of the response.
+func notBuilt(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(placeholder))
+}
+
+const placeholder = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Name}}</title>
+<style>
+  body { margin: 0; display: grid; place-items: center; min-height: 100vh;
+         font: 16px/1.6 system-ui, sans-serif; color: #14171c; background: #fbfbfd; }
+  main { max-width: 34rem; padding: 2rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.5rem; }
+  p { color: #5b6472; }
+  code { background: #f4f5f8; border-radius: 6px; padding: 0.15em 0.4em; }
+</style>
+</head>
+<body>
+<main>
+<h1>{{.Name}} is running</h1>
+<p>The API is answering, but the frontend has not been built yet, so there is
+nothing to show here.</p>
+<p>Run <code>ry dev</code> to develop it with hot reload, or <code>ry build</code>
+to compile it into the binary.</p>
+</main>
+</body>
+</html>
+`
+
+const devServerDown = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Waiting for Vite</title>
+<meta http-equiv="refresh" content="1">
+<style>
+  body { margin: 0; display: grid; place-items: center; min-height: 100vh;
+         font: 16px/1.6 system-ui, sans-serif; color: #5b6472; background: #fbfbfd; }
+</style>
+</head>
+<body><main>Waiting for the Vite dev server...</main></body>
+</html>
+`

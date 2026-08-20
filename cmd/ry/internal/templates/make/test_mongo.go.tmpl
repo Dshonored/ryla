@@ -1,0 +1,31 @@
+package tests
+
+import (
+	"net/url"
+	"testing"
+)
+
+// TestLive{{.Pascal}}Index checks that the listing page renders.
+//
+// client comes from example_test.go: a browser-like client on the application's
+// real router, with its own cookies and the CSRF token already attached to
+// every unsafe request. It skips the test unless MONGO_TEST_URI names a server,
+// which is why the name starts with Live — `go test -run Live ./...` selects
+// exactly the tests that need one.
+func TestLive{{.Pascal}}Index(t *testing.T) {
+	client(t).Get("/{{.KebabPlural}}").
+		AssertOK().
+		AssertContains("{{.Plural}}")
+}
+
+// TestLive{{.Pascal}}Store covers the submit path: what a browser actually
+// posts, and where the handler sends it afterwards.
+func TestLive{{.Pascal}}Store(t *testing.T) {
+	c := client(t)
+	// Where the route needs a signed-in user, start from one:
+	//	c.Login(user.ID.Hex())
+
+	c.Post("/{{.KebabPlural}}", url.Values{
+		"name": {"Example"},
+	}).AssertRedirect("/{{.KebabPlural}}")
+}

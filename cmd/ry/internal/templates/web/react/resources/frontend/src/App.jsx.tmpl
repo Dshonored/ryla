@@ -1,0 +1,234 @@
+import { useEffect, useState } from "react";
+
+import { ApiError, get, post } from "./api.js";
+
+// The welcome page.
+//
+// It exists to be deleted, and it is written to be worth reading first: every
+// panel below is a real round trip to the Go server, so a page that renders is
+// proof that the API, the router, the proxy and the build all agree.
+//
+// To remove it: replace this file, then delete app/controllers/demo.go,
+// app/requests/subscribe.go and the /api/demo routes in routes/web.go.
+export default function App() {
+	const [service, setService] = useState(null);
+	const [failure, setFailure] = useState("");
+
+	useEffect(() => {
+		get("/api")
+			.then(setService)
+			.catch((err) => setFailure(err.message));
+	}, []);
+
+	return (
+		<main className="container">
+			<header className="stack">
+				<span className="badge">Ryla</span>
+				<h1>{service ? service.name : "Loading..."}</h1>
+				<p className="muted">
+					A Go server and a React frontend, served from one address and
+					shipped as one binary.
+				</p>
+			</header>
+
+			{failure && (
+				<p className="notice error">
+					Could not reach the API: {failure}. Is the server still running?
+				</p>
+			)}
+
+			<section className="grid">
+				<Service service={service} />
+				<Counter />
+			</section>
+
+			<Subscribe />
+
+			<Endpoints endpoints={service ? service.endpoints : []} />
+
+			<section className="card">
+				<h2>Where things are</h2>
+				<dl className="facts">
+					<dt>resources/frontend/src</dt>
+					<dd>this page</dd>
+					<dt>routes/web.go</dt>
+					<dd>the route table</dd>
+					<dt>app/controllers</dt>
+					<dd>the JSON endpoints</dd>
+					<dt>app/models</dt>
+					<dd>the database types</dd>
+				</dl>
+				<p className="subtle">
+					Save a file under src/ and the browser updates without reloading;
+					save a .go file and <code>ry dev</code> rebuilds and reloads it for
+					you.
+				</p>
+			</section>
+		</main>
+	);
+}
+
+// Service shows what the API says about the running application.
+function Service({ service }) {
+	return (
+		<article className="card">
+			<h2>This application</h2>
+			{service ? (
+				<dl className="facts">
+					<dt>Environment</dt>
+					<dd>{service.environment}</dd>
+					<dt>Ryla</dt>
+					<dd>{service.ryla}</dd>
+					<dt>Go</dt>
+					<dd>{service.go}</dd>
+					<dt>Database</dt>
+					<dd>{service.database}</dd>
+				</dl>
+			) : (
+				<p className="subtle">Waiting for GET /api...</p>
+			)}
+		</article>
+	);
+}
+
+// Counter proves the round trip in both directions: the value is held by the
+// server, so it survives a reload of this page and resets only when the process
+// does.
+function Counter() {
+	const [count, setCount] = useState(null);
+	const [busy, setBusy] = useState(false);
+	const [failure, setFailure] = useState("");
+
+	async function call(request) {
+		setBusy(true);
+		setFailure("");
+		try {
+			const body = await request();
+			setCount(body.count);
+		} catch (err) {
+			setFailure(err.message);
+		} finally {
+			setBusy(false);
+		}
+	}
+
+	useEffect(() => {
+		call(() => get("/api/demo/counter"));
+	}, []);
+
+	return (
+		<article className="card">
+			<h2>Counter</h2>
+			<p className="counter">{count === null ? "—" : count}</p>
+			<div className="row">
+				<button disabled={busy} onClick={() => call(() => post("/api/demo/counter"))}>
+					Increment
+				</button>
+				<button
+					className="secondary"
+					disabled={busy}
+					onClick={() => call(() => post("/api/demo/counter/reset"))}
+				>
+					Reset
+				</button>
+			</div>
+			{failure && <p className="notice error">{failure}</p>}
+			<p className="subtle">Held in memory by app/controllers/demo.go.</p>
+		</article>
+	);
+}
+
+// Subscribe is the shape almost every form takes: send it, and either show the
+// messages the server rejected it with — keyed by the field name it was sent
+// under, so each one lands beside its own input — or report the success.
+function Subscribe() {
+	const [form, setForm] = useState({ name: "", email: "" });
+	const [errors, setErrors] = useState({});
+	const [message, setMessage] = useState("");
+	const [busy, setBusy] = useState(false);
+
+	function update(field) {
+		return (event) => setForm({ ...form, [field]: event.target.value });
+	}
+
+	async function submit(event) {
+		event.preventDefault();
+		setBusy(true);
+		setErrors({});
+		setMessage("");
+
+		try {
+			const created = await post("/api/demo/subscribe", form);
+			setMessage(`Thanks, ${created.name} — that submission validated cleanly.`);
+			setForm({ name: "", email: "" });
+		} catch (err) {
+			if (err instanceof ApiError && err.status === 422) {
+				setErrors(err.fields);
+			} else {
+				setMessage(err.message);
+			}
+		} finally {
+			setBusy(false);
+		}
+	}
+
+	return (
+		<section className="card">
+			<h2>Validation</h2>
+			<p className="muted">
+				The rules live in app/requests/subscribe.go. Submit it empty to see
+				what a 422 looks like.
+			</p>
+
+			<form className="stack" onSubmit={submit} noValidate>
+				<label>
+					Name
+					<input value={form.name} onChange={update("name")} />
+					{errors.name && <span className="field-error">{errors.name.join(" ")}</span>}
+				</label>
+				<label>
+					Email
+					<input value={form.email} onChange={update("email")} />
+					{errors.email && <span className="field-error">{errors.email.join(" ")}</span>}
+				</label>
+				<div className="row">
+					<button disabled={busy}>Subscribe</button>
+				</div>
+			</form>
+
+			{message && <p className="notice success">{message}</p>}
+		</section>
+	);
+}
+
+// Endpoints lists what this server answers. The list comes from the router
+// itself, so it cannot drift away from routes/web.go.
+function Endpoints({ endpoints }) {
+	if (!endpoints.length) {
+		return null;
+	}
+
+	return (
+		<section className="card">
+			<h2>Endpoints</h2>
+			<table className="endpoints">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Method</th>
+						<th>Path</th>
+					</tr>
+				</thead>
+				<tbody>
+					{endpoints.map((endpoint) => (
+						<tr key={endpoint.name + endpoint.method}>
+							<td>{endpoint.name}</td>
+							<td>{endpoint.method}</td>
+							<td>{endpoint.path}</td>
+						</tr>
+					))}
+				</tbody>
+			</table>
+		</section>
+	);
+}

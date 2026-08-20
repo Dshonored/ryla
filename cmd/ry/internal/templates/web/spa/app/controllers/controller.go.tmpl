@@ -1,0 +1,92 @@
+// Package controllers holds the application's HTTP handlers.
+//
+// Everything under /api is JSON, failures included. A frontend that has parsed
+// every response so far should never be handed an HTML error page the moment
+// something goes wrong: that turns a clear 500 into a parse error several
+// layers away from the code that caused it.
+//
+// The page itself is not rendered here at all. frontend.go serves the compiled
+// single-page app — or proxies to Vite while you are developing it — and that
+// is the only handler in this package that answers HTML.
+package controllers
+
+import (
+	"encoding/json"
+	"log/slog"
+	"net/http"
+
+	"{{.RylaModule}}/middleware"
+	"{{.RylaModule}}/validate"
+
+	"{{.Module}}/app"
+)
+
+// ContentType is sent with every response. There is no charset parameter
+// because application/json does not define one — JSON is UTF-8 by definition —
+// so adding it would only be noise.
+const ContentType = "application/json"
+
+// Base is embedded by every controller. It carries the application and the
+// handful of response helpers that would otherwise be repeated in each handler.
+type Base struct {
+	App *app.App
+}
+
+// JSON writes v as the response body with the given status.
+func (c Base) JSON(w http.ResponseWriter, r *http.Request, status int, v any) {
+	writeJSON(w, r, status, v)
+}
+
+// NoContent answers 204, for a handler that succeeded and has nothing to say.
+// A DELETE is the usual case.
+func (c Base) NoContent(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Error answers with a failure in the one shape every failure in this
+// application uses. See ErrorResponse in errors.go.
+func (c Base) Error(w http.ResponseWriter, r *http.Request, status int, message string) {
+	WriteError(w, r, status, message, nil)
+}
+
+// Invalid answers 422 with a message per rejected field.
+//
+// It is a separate helper from Error because the two failures are different:
+// Error says the request could not be dealt with, Invalid says exactly which
+// values to correct, and a client can act on the second without a human.
+func (c Base) Invalid(w http.ResponseWriter, r *http.Request, bag validate.ErrorBag) {
+	WriteError(w, r, http.StatusUnprocessableEntity, "The request is invalid.", bag)
+}
+
+// Log returns the request-scoped logger. It carries the request id, so a line
+// about a failure can be matched to the response the caller saw and quoted
+// back from the X-Request-Id header.
+func (c Base) Log(r *http.Request) *slog.Logger {
+	return middleware.LoggerFrom(r.Context())
+}
+
+// writeJSON encodes v and sends it.
+//
+// The body is marshalled before anything is written, because encoding straight
+// into the ResponseWriter commits the status line first: a value that fails
+// halfway through would leave the client a 200 and a truncated body it cannot
+// parse, which is far harder to diagnose than a clean 500.
+func writeJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		middleware.LoggerFrom(r.Context()).Error("encode json response",
+			"error", err, "method", r.Method, "path", r.URL.Path)
+
+		// Written by hand rather than through this function again: the fallback
+		// exists precisely because marshalling failed, and marshalling it would
+		// be the same gamble a second time.
+		status = http.StatusInternalServerError
+		body = []byte(`{"error":{"message":"Internal Server Error","status":500}}`)
+	}
+
+	w.Header().Set("Content-Type", ContentType)
+	w.WriteHeader(status)
+	// The trailing newline is for the humans: it keeps curl output off the
+	// shell prompt and makes a log of raw bodies readable.
+	_, _ = w.Write(append(body, '\n'))
+}

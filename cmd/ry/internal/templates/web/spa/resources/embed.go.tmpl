@@ -1,0 +1,42 @@
+// Package resources embeds the compiled frontend into the binary.
+//
+// This is what keeps `ry build` honest for a project with a JavaScript build
+// step: Vite writes into frontend/dist, the directive below folds that whole
+// tree into the executable, and the deployed artifact is still one file with no
+// assets directory to copy beside it.
+package resources
+
+import (
+	"embed"
+	"io/fs"
+)
+
+// distDir is the embedded frontend build.
+//
+// The all: prefix earns its place twice over. Vite emits dot-prefixed files for
+// some plugins, and frontend/dist/.gitkeep is what keeps this directive
+// compiling in a checkout where the frontend has never been built — an embed
+// pattern that matches nothing is a build error, and putting Node between a
+// developer and `go build` would be a poor trade.
+//
+//go:embed all:frontend/dist
+var distDir embed.FS
+
+// Dist returns the built frontend, rooted so that index.html is at the top.
+func Dist() fs.FS {
+	sub, err := fs.Sub(distDir, "frontend/dist")
+	if err != nil {
+		// Only reachable if the embed directive and this path disagree, which
+		// is a build-time mistake rather than a runtime condition.
+		panic(err)
+	}
+	return sub
+}
+
+// Built reports whether the frontend has actually been compiled into this
+// binary. A checkout that has never run Vite still embeds the placeholder tree,
+// so the server can say what to run instead of answering 404 for every page.
+func Built() bool {
+	_, err := fs.Stat(distDir, "frontend/dist/index.html")
+	return err == nil
+}

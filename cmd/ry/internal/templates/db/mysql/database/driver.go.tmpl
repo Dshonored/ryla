@@ -1,0 +1,27 @@
+// Package database selects the SQL driver this project was generated for.
+//
+// Importing it registers the dialect with the framework's db package. Only the
+// chosen driver is linked into the binary, so a MySQL build carries no SQLite
+// or Postgres code.
+package database
+
+import (
+	// Registers the "mysql" dialect, which serves MariaDB too: it speaks the
+	// same wire protocol, and the driver asks the server for its version on
+	// connect so the older syntax quirks are handled for us.
+	_ "{{.RylaModule}}/db/mysql"
+)
+
+// Driver is the dialect name used in configuration.
+const Driver = "mysql"
+
+// DefaultDSN points at a local server with the stock root account.
+//
+// None of the parameters are decoration. parseTime=True is what lets a
+// DATETIME column scan into a time.Time; without it every timestamp in the
+// framework's own tables fails inside the driver, well before anything you
+// wrote gets to look at it. charset=utf8mb4 is the only encoding in MySQL that
+// covers the whole of Unicode — the one confusingly named "utf8" is three
+// bytes and drops emoji on the floor. loc=Local keeps returned times in the
+// zone the application already reasons in.
+const DefaultDSN = {{.DefaultDSN | quote}}

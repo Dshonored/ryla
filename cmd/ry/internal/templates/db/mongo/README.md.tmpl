@@ -30,6 +30,7 @@ The app listens on http://localhost:8080.
 | `ry key:generate` | Generate the key that signs cookies |
 | `ry make:model Post` | Generate a document type and its index declaration |
 | `ry routes` | List named routes |
+| `ry make:test Posts` | Generate a feature test |
 
 ## No migrations
 
@@ -45,6 +46,38 @@ exists is a no-op, so it is safe on every deploy.
 `ry migrate:status` lists what the server actually has, marking any index that
 is not declared in the code — usually one created by hand, or left over from a
 deploy that has since dropped the declaration.
+
+## Authentication
+
+`ry make:auth` and `ry make:2fa` are written against GORM, so they are not
+available on MongoDB and will tell you so rather than write files that cannot
+compile. The framework packages behind them still work: `auth` for password
+hashing and verification, `session` for the session store — already wired, and
+already backed by MongoDB — and `twofactor` for TOTP secrets and recovery codes.
+Personal access tokens (`bearer`) are GORM-only and would need a collection of
+your own.
+
+[AGENTS.md](AGENTS.md) lists the decisions the SQL scaffold makes for you, so
+that hand-writing this does not quietly drop one.
+
+## Tests
+
+```bash
+MONGO_TEST_URI=mongodb://localhost:27017 go test ./...
+```
+
+`tests/example_test.go` builds the whole application and makes requests through
+the real router and middleware stack:
+
+```go
+client(t).Get("/").AssertOK().AssertContains("Welcome")
+```
+
+They need a server, so they skip unless `MONGO_TEST_URI` names one — and they
+drop the database they use, so point it somewhere disposable. The client keeps
+cookies between requests, carries the CSRF token on every form submission, and
+`Login(user.ID.Hex())` signs it in without going through the login form. Copy
+the file for your own tests, or generate one with `ry make:test Posts`.
 
 ## The welcome page
 
@@ -67,6 +100,7 @@ config/         typed configuration, read from the environment
 database/       connection defaults and seeders
 resources/      templ views and static assets
 routes/         the route table
+tests/          feature tests through the real router
 storage/        logs and build scratch
 cmd/app/        the binary's entrypoint
 ```

@@ -1,0 +1,127 @@
+package auth
+
+import (
+	"strconv"
+
+	"github.com/Dshonored/ryla/csrf"
+	"github.com/Dshonored/ryla/flash"
+	"github.com/Dshonored/ryla/validate"
+
+	"{{.Module}}/resources/views"
+)
+
+// TwoFactorSetupForm drives both states of the page: turning two-factor
+// authentication on, and turning it off again.
+//
+// Secret is the plaintext shared secret, and is only ever set while an
+// enrolment is in progress. Once the account is enrolled the page has no
+// business showing it again — a secret that can be read back off a settings
+// page is a secret anyone who borrows the laptop can copy.
+type TwoFactorSetupForm struct {
+	Enabled           bool
+	Secret            string
+	RecoveryCodesLeft int
+	Errors            validate.ErrorBag
+	Messages          []flash.Message
+}
+
+templ TwoFactorSetup(form TwoFactorSetupForm) {
+	@views.Layout("Two-factor authentication") {
+		<div class="stack auth-card">
+			@views.Flashes(form.Messages)
+
+			if form.Enabled {
+				@twoFactorEnabled(form)
+			} else {
+				@twoFactorEnrol(form)
+			}
+		</div>
+	}
+}
+
+templ twoFactorEnrol(form TwoFactorSetupForm) {
+	<header class="stack-sm">
+		<h1>Turn on two-factor authentication</h1>
+		<p class="muted small">
+			Scan this with an authenticator app, then type the code it shows to
+			confirm the app and this site agree.
+		</p>
+	</header>
+
+	<div class="stack-sm">
+		<img
+			src="/two-factor/setup/qr.png"
+			alt="QR code for enrolling in two-factor authentication"
+			width="240"
+			height="240"
+		/>
+		<p class="muted small">
+			No camera? Enter this key by hand:
+			<code>{ form.Secret }</code>
+		</p>
+	</div>
+
+	<form method="post" action="/two-factor/setup" class="stack-sm" novalidate>
+		@templ.Raw(csrf.Field(ctx))
+
+		<div class="field">
+			<label for="code">Code from your app</label>
+			<input
+				id="code"
+				name="code"
+				type="text"
+				inputmode="numeric"
+				autocomplete="one-time-code"
+				autofocus
+				aria-invalid={ views.AriaInvalid(form.Errors, "code") }
+			/>
+			if form.Errors.Has("code") {
+				<p class="field-error">{ form.Errors.First("code") }</p>
+			} else {
+				<p class="muted small">Six digits. It changes every thirty seconds.</p>
+			}
+		</div>
+
+		<div>
+			<button class="btn" type="submit">Confirm and turn on</button>
+		</div>
+	</form>
+}
+
+templ twoFactorEnabled(form TwoFactorSetupForm) {
+	<header class="stack-sm">
+		<h1>Two-factor authentication is on</h1>
+		<p class="muted small">
+			You have { strconv.Itoa(form.RecoveryCodesLeft) } recovery codes left.
+			Turn this off and on again to get a fresh set.
+		</p>
+	</header>
+
+	<form method="post" action="/two-factor/disable" class="stack-sm" novalidate>
+		@templ.Raw(csrf.Field(ctx))
+
+		<div class="field">
+			<label for="code">Code from your app</label>
+			<input
+				id="code"
+				name="code"
+				type="text"
+				inputmode="numeric"
+				autocomplete="one-time-code"
+				aria-invalid={ views.AriaInvalid(form.Errors, "code") }
+			/>
+			if form.Errors.Has("code") {
+				<p class="field-error">{ form.Errors.First("code") }</p>
+			} else {
+				<p class="muted small">
+					Asked for so that somebody who finds an unlocked
+					screen cannot turn this off in one click.
+				</p>
+			}
+		</div>
+
+		<div>
+			<button class="btn" type="submit">Turn off two-factor authentication</button>
+		</div>
+	</form>
+}

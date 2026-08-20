@@ -15,6 +15,7 @@ import (
 
 	rylog "github.com/Dshonored/ryla/log"
 
+	"github.com/Dshonored/ryla/cmd/ry/internal/frontend"
 	"github.com/Dshonored/ryla/cmd/ry/internal/project"
 	"github.com/Dshonored/ryla/cmd/ry/internal/toolchain"
 	"github.com/Dshonored/ryla/cmd/ry/internal/watcher"
@@ -25,6 +26,7 @@ func devCmd() *cobra.Command {
 		addr       string
 		debounce   time.Duration
 		strictPort bool
+		noVite     bool
 	)
 
 	cmd := &cobra.Command{
@@ -37,7 +39,11 @@ A compile error does not stop the watcher: fix the file and save again.
 
 If the port is already taken, dev moves to the next free one and says so, so a
 forgotten server elsewhere does not block you. Pass --strict-port to fail
-instead.`,
+instead.
+
+A project with a Vite frontend gets that too: Vite runs alongside, and the Go
+server proxies whatever no route matched to it, so there is still one address to
+open and the frontend keeps its own hot reload.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := currentProject()
@@ -66,6 +72,21 @@ instead.`,
 				env = append(env, "FORCE_COLOR=1")
 			}
 
+			// Vite is started before the first build rather than after it, so
+			// it is already compiling while Go is, and the two waits overlap.
+			if frontend.Enabled(p) && !noVite {
+				dev, err := frontend.StartDev(ctx, p, out)
+				if err != nil {
+					return withHint(err, "To work on the Go side alone, run `ry dev --no-vite`. The app then serves the last frontend build.")
+				}
+				defer dev.Stop()
+
+				// The application decides from this variable alone whether to
+				// proxy or to serve its embedded build, so an unset one is what
+				// makes a release binary behave like a release binary.
+				env = append(env, frontend.DevURLEnv+"="+dev.URL)
+			}
+
 			r := &watcher.Runner{
 				Project:  p,
 				Args:     args,
@@ -84,7 +105,18 @@ instead.`,
 	cmd.Flags().StringVar(&addr, "addr", "", "address to listen on (overrides APP_ADDR)")
 	cmd.Flags().DurationVar(&debounce, "debounce", 300*time.Millisecond, "how long to wait for writes to settle")
 	cmd.Flags().BoolVar(&strictPort, "strict-port", false, "fail if the port is taken instead of using the next free one")
+	cmd.Flags().BoolVar(&noVite, "no-vite", false, "do not run the Vite dev server; serve the last frontend build instead")
 	return cmd
+}
+
+// withHint appends a way out to a missing-Node failure. The suggestion differs
+// between the commands: development can carry on without a frontend, while a
+// build that skipped it would embed something stale and say nothing.
+func withHint(err error, hint string) error {
+	if errors.Is(err, frontend.ErrNodeMissing) {
+		return fmt.Errorf("%w.\n\n%s", err, hint)
+	}
+	return err
 }
 
 func buildCmd() *cobra.Command {
@@ -99,7 +131,8 @@ func buildCmd() *cobra.Command {
 		Long: `Generate view code and compile the application into one binary.
 
 Views and static assets are embedded, so the result is the only file that has
-to reach the server.`,
+to reach the server. A Vite frontend is compiled first and embedded with them,
+which is what keeps that promise true for a project with a JavaScript build.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			p, err := currentProject()
@@ -112,6 +145,16 @@ to reach the server.`,
 			if output != "" {
 				if dest, err = filepath.Abs(output); err != nil {
 					return err
+				}
+			}
+
+			// Before the Go build, not after: the compiler embeds whatever is in
+			// the output directory at the moment it runs, so a frontend built
+			// second would only reach the binary on the next build.
+			if frontend.Enabled(p) {
+				fmt.Fprintln(out, "Building the frontend...")
+				if err := frontend.Build(cmd.Context(), p, out); err != nil {
+					return withHint(err, "The frontend has to be compiled before it can be embedded, so there is no way around it for a release build.")
 				}
 			}
 

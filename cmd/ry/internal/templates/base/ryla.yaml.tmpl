@@ -16,6 +16,15 @@ build:
   output: {{.Name}}
   # When true, `ry` runs `go tool templ generate` before every build.
   templ: {{.UsesTempl}}
+{{- if .UsesVite }}
+  # When true, `ry dev` runs the Vite dev server alongside the app and `ry build`
+  # compiles the frontend before the Go build embeds it. Turning this off leaves
+  # the last build embedded, which is occasionally what you want in CI.
+  vite: true
+  # Directory holding package.json. Vite writes into its dist/, which is the
+  # directory resources/embed.go compiles into the binary.
+  frontend: resources/frontend
+{{- end }}
 
 dev:
   # Extra paths the file watcher ignores, on top of the defaults.

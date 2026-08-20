@@ -1,0 +1,77 @@
+package controllers
+
+import (
+	"net/http"
+	"runtime"
+	"strings"
+
+	"{{.RylaModule}}"
+
+	"{{.Module}}/app"
+)
+
+// Home serves the two endpoints that describe the service itself rather than
+// anything it stores: the index at / and the liveness check at /up.
+type Home struct {
+	Base
+}
+
+// NewHome builds the controller. Dependencies arrive through the App struct
+// rather than being resolved from a container, so this wiring is visible in
+// routes/web.go and checked by the compiler.
+func NewHome(a *app.App) *Home {
+	return &Home{Base{App: a}}
+}
+
+// service is what GET / answers with.
+type service struct {
+	Name        string     `json:"name"`
+	Environment string     `json:"environment"`
+	Ryla        string     `json:"ryla"`
+	Go          string     `json:"go"`
+	Database    string     `json:"database"`
+	Endpoints   []endpoint `json:"endpoints"`
+}
+
+// endpoint is one route in the index's listing.
+type endpoint struct {
+	Name   string `json:"name"`
+	Method string `json:"method"`
+	Path   string `json:"path"`
+}
+
+// Index handles GET /.
+//
+// It stands in for the welcome page a server-rendered project gets: proof that
+// the application is wired up, and a list of what it serves, in the one format
+// this application speaks. The list is read from the router rather than typed
+// out here, so it cannot drift away from routes/web.go.
+//
+// It exists to be replaced. An index that enumerates every route is a fine
+// thing while you are building and a poor thing to leave facing the public.
+func (c *Home) Index(w http.ResponseWriter, r *http.Request) {
+	routes := c.App.Router.Routes()
+
+	endpoints := make([]endpoint, 0, len(routes))
+	for _, rt := range routes {
+		endpoints = append(endpoints, endpoint{Name: rt.Name, Method: rt.Method, Path: rt.Pattern})
+	}
+
+	c.JSON(w, r, http.StatusOK, service{
+		Name:        c.App.Config.Name,
+		Environment: c.App.Config.Env,
+		Ryla:        ryla.Version(),
+		Go:          strings.TrimPrefix(runtime.Version(), "go"),
+		Database:    c.App.Config.DB.Driver,
+		Endpoints:   endpoints,
+	})
+}
+
+// Health handles GET /up, the endpoint a load balancer polls.
+//
+// It deliberately touches nothing. A health check that queries the database
+// takes the whole instance out of rotation for a blip it could have ridden
+// out, and reports a failure of something the instance does not own.
+func (c *Home) Health(w http.ResponseWriter, r *http.Request) {
+	c.JSON(w, r, http.StatusOK, map[string]string{"status": "ok"})
+}

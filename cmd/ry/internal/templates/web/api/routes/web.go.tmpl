@@ -1,0 +1,49 @@
+// Package routes declares the application's HTTP routes.
+//
+// Routes are written by hand and never rewritten by a generator, so this file
+// stays a reliable table of contents for the application. `ry make:controller`
+// prints the lines to add rather than editing this file behind your back.
+package routes
+
+import (
+	"{{.RylaModule}}/router"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/controllers"
+)
+
+// Register attaches every route to the application's router.
+func Register(a *app.App) {
+	home := controllers.NewHome(a)
+	demo := controllers.NewDemo(a)
+	errs := controllers.NewErrors(a)
+
+	// The failures no handler is reached for. Without these three an API that
+	// answers JSON everywhere else hands back an HTML page or plain text for a
+	// mistyped path, a wrong method, or a bug — the three responses a client is
+	// least prepared to parse and most likely to hit first.
+	//
+	// Recover is added here, after app.New has built the middleware stack, so
+	// it ends up innermost and sees a handler's panic before the framework's
+	// text/plain recovery does.
+	a.Router.Use(errs.Recover)
+	a.Router.NotFound(errs.NotFound)
+	a.Router.MethodNotAllowed(errs.MethodNotAllowed)
+
+	a.Router.Get("/", home.Index).Name("index")
+	a.Router.Get("/up", home.Health).Name("health")
+
+	// Everything that changes state lives under /api/, which csrf.Protect
+	// skips. A request authenticated by a bearer token cannot be forged by a
+	// third-party page, because the browser does not attach the credential on
+	// its own — and the CSRF middleware's own rejection is plain text, which is
+	// one more reason not to route past it.
+	a.Router.Route("/api", func(r *router.Router) {
+		// The demo. Delete this block along with app/controllers/demo.go and
+		// app/requests/subscribe.go once you have endpoints of your own.
+		r.Get("/demo/counter", demo.Counter).Name("demo.counter")
+		r.Post("/demo/counter", demo.Counter).Name("demo.counter.increment")
+		r.Post("/demo/counter/reset", demo.Reset).Name("demo.counter.reset")
+		r.Post("/demo/subscribe", demo.Subscribe).Name("demo.subscribe")
+	})
+}

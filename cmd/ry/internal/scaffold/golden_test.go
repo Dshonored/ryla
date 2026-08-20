@@ -102,6 +102,12 @@ func generateAndBuild(t *testing.T, root, db, web string) {
 	run(t, ctx, dir, "go", "mod", "tidy")
 	run(t, ctx, dir, "go", "build", "./...")
 	run(t, ctx, dir, "go", "vet", "./...")
+	// The generated example test is the whole testing story a new project
+	// starts with, so it has to pass on the day the project is created. One
+	// that does not teaches, from the first run, that the tests here are
+	// decorative. Where a project's tests need a server it does not have, they
+	// skip, and this still passes.
+	run(t, ctx, dir, "go", "test", "./...")
 
 	assertGofmtClean(t, ctx, dir)
 }
@@ -238,6 +244,7 @@ func TestAuthScaffoldCompiles(t *testing.T) {
 	run(t, ctx, dir, "go", "mod", "tidy")
 	run(t, ctx, dir, "go", "build", "./...")
 	run(t, ctx, dir, "go", "vet", "./...")
+	run(t, ctx, dir, "go", "test", "./...")
 
 	assertGofmtClean(t, ctx, dir)
 }

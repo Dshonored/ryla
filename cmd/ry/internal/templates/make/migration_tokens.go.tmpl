@@ -1,0 +1,43 @@
+package migrations
+
+import (
+	"time"
+
+	"gorm.io/gorm"
+
+	"{{.RylaModule}}/migrate"
+)
+
+func init() {
+	migrate.Register("{{.ID}}", up{{.Version}}, down{{.Version}})
+}
+
+// personalAccessToken{{.Version}} is the shape of the personal_access_tokens
+// table as of this migration. It is a copy of the framework's bearer.Token
+// rather than a reference to it, for the same reason every generated migration
+// carries its own snapshot: this must keep doing what it did the day it was
+// written, even after a framework upgrade changes the struct.
+//
+// Digest holds a SHA-256 of the token, never the token itself, so a stolen
+// table hands over no working credentials. The unique index on it is what makes
+// authenticating an API request one indexed lookup.
+type personalAccessToken{{.Version}} struct {
+	ID         uint   `gorm:"primaryKey"`
+	UserID     string `gorm:"index;size:64"`
+	Name       string `gorm:"size:120"`
+	Digest     string `gorm:"uniqueIndex;size:64"`
+	Scopes     string `gorm:"size:255"`
+	LastUsedAt *time.Time
+	ExpiresAt  *time.Time `gorm:"index"`
+	CreatedAt  time.Time
+}
+
+func (personalAccessToken{{.Version}}) TableName() string { return "personal_access_tokens" }
+
+func up{{.Version}}(tx *gorm.DB) error {
+	return tx.Migrator().CreateTable(&personalAccessToken{{.Version}}{})
+}
+
+func down{{.Version}}(tx *gorm.DB) error {
+	return tx.Migrator().DropTable(&personalAccessToken{{.Version}}{})
+}

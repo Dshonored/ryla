@@ -1,0 +1,14 @@
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+
+import App from "./App.jsx";
+import "./app.css";
+
+// The stylesheet is imported rather than linked from index.html so that Vite
+// owns it: in development a change to it is swapped into the running page, and
+// in a build it becomes a hashed file the browser can cache forever.
+createRoot(document.getElementById("root")).render(
+	<StrictMode>
+		<App />
+	</StrictMode>,
+);

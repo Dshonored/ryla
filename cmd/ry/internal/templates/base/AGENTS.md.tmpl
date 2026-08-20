@@ -13,14 +13,27 @@ module `{{.Module}}`, {{.DB}} database, `{{.Web}}` web mode.
 | Roll back the last batch | `ry migrate:rollback` |
 | Show migration state | `ry migrate:status` |
 | List named routes | `ry routes` |
+| Run background jobs | `ry queue:work` |
+| Run recurring tasks | `ry schedule:run` |
 | Run tests | `go test ./...` |
 
-Prefer `ry` over raw `go run`: it regenerates view code first, which the build
+{{ if .UsesVite }}Prefer `ry` over raw `go run`: it builds the frontend first, which the binary
+embeds. `ry` commands accept `--json` where there is something to parse.
+{{ else }}Prefer `ry` over raw `go run`: it regenerates view code first, which the build
 needs. `ry` commands accept `--json` where there is something to parse.
-
+{{ end }}
 ## The demo page
 
 A new project ships a welcome page that exercises the whole stack. It is meant
+{{- if .UsesVite }}
+to be deleted. Removing it means: `app/controllers/demo.go`,
+`app/requests/subscribe.go`, the `/api/demo` routes in `routes/web.go`, and the
+welcome component in `resources/frontend/src`.
+
+`resources/frontend/src/app.css` is not part of the demo — it is a design system
+of tokens and components. Keep it and build on it, or replace it; nothing in the
+framework depends on those class names.
+{{- else }}
 to be deleted. Removing it means: `app/controllers/demo.go`, the `/demo/counter`
 routes in `routes/web.go`, `resources/static/demo.js`, the `Env` struct in
 `resources/views/home.templ`, and the fields it reads in
@@ -29,12 +42,18 @@ routes in `routes/web.go`, `resources/static/demo.js`, the `Env` struct in
 `resources/static/app.css` is not part of the demo — it is a design system of
 tokens and components. Keep it and build on it, or replace it; nothing in the
 framework depends on those class names.
+{{- end }}
 
 ## Do not edit these
 
-- **`*_templ.go`** — generated from the neighbouring `.templ` file by
+{{ if .UsesTempl }}- **`*_templ.go`** — generated from the neighbouring `.templ` file by
   `templ generate`. Edit the `.templ` and rebuild; changes here are erased.
-- **`storage/`** — the database file, logs and build scratch. Not source.
+{{ end }}{{ if .UsesVite }}- **`resources/frontend/dist/`** — written by `vite build` and embedded into
+  the binary. Edit `resources/frontend/src` instead. The `.gitkeep` inside it
+  must stay: the embed directive that picks the directory up will not compile
+  against nothing, and the project would then need Node to build any Go.
+- **`resources/frontend/node_modules/`** — managed by npm.
+{{ end }}- **`storage/`** — the database file, logs and build scratch. Not source.
 - **`go.sum`** — managed by `go mod tidy`.
 
 ## Conventions that matter
@@ -67,7 +86,21 @@ has not already set, never the reverse.
 inject a small script that watches an event stream. A rebuild restarts the
 process, the stream drops, and the page reloads once the new server answers.
 Nothing to configure, and it is absent from a production build.
+{{ if .UsesVite }}
+**The frontend is a separate build, served from the same origin.**
+`resources/frontend` is a Vite application and holds the whole user interface;
+the Go side answers JSON under `/api`. `ry dev` starts Vite on a port of its own
+and the server proxies everything the router did not match to it, so the browser
+sees one address: `fetch("/api/...")` needs no base URL and there is no CORS to
+configure. Vite handles its own hot reloading; the Go rebuild still reloads the
+page as described above.
 
+`ry build` runs `vite build` before the Go build and embeds `dist/`, which is
+what keeps the deployed artifact a single file. Node is needed to build the
+frontend and never to run it. Routes for the browser's own paths do not belong
+in `routes/web.go` — anything that is not `/api` or `/up` falls through to the
+application shell on purpose.
+{{ end }}
 **Forms follow one shape.** Declare what a request may contain in
 `app/requests`, then bind and validate in one step:
 
@@ -87,11 +120,40 @@ header, reading the value from the `csrf-token` meta tag. Without it the
 middleware answers 403. Routes under `/api/` are exempt, since a bearer token
 is not attached by the browser automatically and so cannot be forged.
 
-**Authentication, if `ry make:auth` has been run.** Sessions live in the
+{{ if ne .Web "mvc" }}**Authentication is hand-written in this project.** `ry make:auth` and
+`ry make:2fa` generate server-rendered templ pages, so they require the `mvc`
+web mode and refuse to run here rather than write files that will not compile.
+The framework packages they build on are still available and are what you should
+use: `auth` for password hashing and sign-in, `session` for the session store,
+`bearer` for API tokens, and `twofactor` for TOTP. The notes below describe the
+generated flow, and are worth reading as the shape to copy — the security
+properties are the same whether the code was generated or typed.
+
+{{ end }}**Authentication, if `ry make:auth` has been run.** Sessions live in the
 database, so they can be revoked. `auth.Login` regenerates the session id — do
 not skip that, it is what closes session fixation. `middleware.User(ctx)`
 returns the signed-in `*models.User` or nil. Protect routes with
 `ryauth.RequireAuth("/login")` inside a group.
+
+The scaffold covers the whole flow, not just the login form: registration, email
+verification, sign-in, sign-out, and password reset via `/forgot-password` and
+`/reset-password`. All of it is in `app/controllers/auth.go` and
+`routes/auth.go`, and all of it is yours to edit.
+
+**Password reset is a signed link, not a database row.** The token comes from
+`a.Signer` under `PurposeResetPassword` and carries the user id, so nothing has
+to be stored and a reset link cannot be replayed against `/verify`. The
+signature is re-checked when the form is submitted, never trusted from the
+hidden field alone — the expiry has to be judged then rather than when the page
+was drawn. `/forgot-password` answers the same way whether or not the address
+exists, for the same reason registration does.
+
+A completed reset calls `signOutEverywhere`, which destroys the user's other
+sessions: a reset is usually the answer to a compromise, and a live session left
+behind keeps exactly the access the reset was meant to remove. That needs a
+server-side store, so it does nothing under `SESSION_DRIVER=cookie` and logs a
+warning saying so. If you add anything else that grants access — personal access
+tokens especially — revoke it there too.
 
 Two rules the login handler follows on purpose: a wrong password and an unknown
 email produce the *same* message, or the form becomes a way to discover
@@ -117,6 +179,47 @@ existing one. That is also why signup does not sign you in: doing so would make
 a successful registration observably different from one that hit an existing
 address, which is the whole leak. Following the emailed link proves control of
 the address, and that is what signs the account in.
+
+**Two-factor, if `ry make:2fa` has been run.** TOTP, with an enrolment page, a
+QR code, a challenge and single-use recovery codes.
+
+The gate is `middleware.RequireTwoFactor`, not a branch in the login handler.
+That is deliberate: a redirect from the sign-in handler would cover the one
+route it runs on, and a bookmark, an API call or a form posted from another tab
+would still walk past it with an authenticated session. Being held at the
+challenge is not the same as being signed out — the user is identified and the
+password is checked; only the second factor is missing. `/two-factor`,
+`/logout` and `/static` are exempt, or the redirect loops and a user who cannot
+answer is trapped in the session.
+
+Secrets are sealed, not hashed. The server recomputes codes from the secret on
+every sign-in, so it must be recoverable — `twofactor.Vault` encrypts it with
+AES-256-GCM under a key derived from APP_KEY, which lives in the environment
+rather than the database, so a stolen users table is inert on its own. Do not
+store a secret any other way, and do not log one.
+
+Verify through `twofactor.Verifier` rather than calling `twofactor.Verify`
+directly. A six-digit code is a million guesses, which is an afternoon's work
+unthrottled; the Verifier carries the per-account limit of five attempts a
+quarter of an hour so it cannot be left out by accident. That limiter is
+in-process, so several instances each keep their own count.
+
+Recovery codes are shown once, at enrolment, and stored only as hashes. If a
+user loses them there is nothing to recover — reissue.
+
+**Personal access tokens, for API and mobile clients.** The framework's `bearer`
+package authenticates an `Authorization: Bearer` header against tokens stored as
+SHA-256 digests, with scopes, expiry and immediate revocation. There is no
+generator for it yet, so wiring it up is by hand: a migration for the
+`personal_access_tokens` table, `bearer.New(a.DB)`, and `bearer.Authenticate`
+on the API group.
+
+The plaintext exists exactly once, when the token is created — `bearer.Create`
+returns it and nothing stores it. A settings page can list a user's tokens but
+can never show them again, which is the honest behaviour. Revocation is a
+database delete rather than a cache entry, so it takes effect on the next
+request. Routes authenticated this way are CSRF-exempt on purpose: a browser
+does not attach the header automatically, so the request cannot be forged.
 
 **Mail.** `a.Mail.Send(ctx, msg)` with messages built in `app/mails`. The log
 driver is the default outside production and prints the plain-text body, so
@@ -166,14 +269,57 @@ right call once the app runs as more than one process.
 
 **APP_KEY signs cookies.** CSRF tokens, flash messages and sessions all depend
 on it. It is generated per project; the app refuses to start in production
-without one. Rotate with `ry key:generate --force`, which logs everyone out.
+without one. Rotate with `ry key:generate --force`, which logs everyone out —
+and, if two-factor is enabled, makes every sealed TOTP secret unreadable, so
+enrolments have to be redone.
 
-**Views are compiled.** `.templ` files become Go, so a typo or a wrong argument
+**This project is on {{.DB}}.** `database/driver.go` selects the dialect and
+`DB_DSN` in `.env` points at it. Everything above the driver is GORM, so the
+application code does not care which of SQLite, Postgres and MySQL is
+underneath — but the migrations can. Postgres wraps DDL in a transaction, so a
+failed migration leaves nothing half-built; MySQL commits DDL implicitly, so a
+migration that fails halfway leaves the earlier statements applied and needs
+fixing forward. Write migrations one table at a time and they behave the same
+everywhere.
+
+Do not reach for engine-specific SQL without a reason. If you do — a Postgres
+`jsonb` column, a MySQL fulltext index — say so in the migration's comment, so
+the next person knows the project is no longer portable.
+
+**Tests drive the real application.** `tests/example_test.go` builds the whole
+app against a throwaway in-memory SQLite database with the migrations applied,
+then makes requests through the router and its full middleware stack — sessions,
+CSRF, recovery — rather than calling a handler function. Run them with
+`go test ./...`; add one with `ry make:test Posts`.
+
+    client(t).Get("/posts").AssertOK().AssertContains("First post")
+
+`client(t)` hands back a browser-like client: its own cookies, the CSRF token
+attached to every unsafe request, and `LoginID(user.ID)` to start from a
+signed-in user. Assertions print the response body when they fail, which is
+usually the whole diagnosis. The application is built once per test binary, so
+tests share a database — clean up what you write.
+
+The helpers come from the framework's `testing` package, imported as `rytest`:
+`rytest.Env(t)` sets the environment, `rytest.Migrate(t, db)` applies the
+migrations, `rytest.New(t, cfg)` builds the client. `PostJSON`, `JSON` and
+`Delete` cover the non-form methods, and `AssertRedirect`, `AssertContains` and
+`AssertJSON` cover most of what a feature test needs to say.
+{{ if ne .DB "sqlite" }}
+Note that `rytest.Env` points the tests at in-memory SQLite even though this
+project runs on {{.DB}}. That is what keeps `go test ./...` fast and dependency
+free, and it is the right default — but it means the tests do not exercise
+{{.DB}} itself. Anything that depends on the engine, rather than on GORM above
+it, needs a test pointed at a real server, and that test should skip when the
+server is absent rather than fail.
+{{ end }}
+
+{{ if .UsesTempl }}**Views are compiled.** `.templ` files become Go, so a typo or a wrong argument
 is a build error rather than a blank page. Render through the controller's
 `Render` helper, which buffers output so a failed render becomes a clean 500
 instead of half a page.
 
-## Layout
+{{ end }}## Layout
 
 ```
 app/controllers/   HTTP handlers; embed Base for Render/JSON/Redirect
@@ -185,9 +331,10 @@ app/requests/      what a form may contain, and what counts as valid
 config/            typed settings
 database/migrations/  self-registering, timestamped
 database/seeders/  ordered, called from Run
-resources/views/   .templ components
-resources/static/  embedded into the binary
+{{ if .UsesVite }}resources/frontend/  the Vite application: src/ is source, dist/ is embedded{{ else }}resources/views/   .templ components
+resources/static/  embedded into the binary{{ end }}
 routes/            the route table
+tests/             feature tests through the real router
 cmd/app/           entrypoint: build the app, register routes, run
 ```
 
@@ -198,10 +345,12 @@ ry make:model Post                 # model + create-table migration
 ry make:controller Posts --resource  # the seven CRUD handlers
 ry make:migration add_slug_to_posts
 ry make:middleware EnsureAdmin
-ry make:auth                       # registration, sign-in, sign-out
+ry make:auth                       # registration, sign-in, sign-out, password reset
+ry make:2fa                        # TOTP two-factor, on top of make:auth
 ry make:job SendWelcomeEmail       # background job
 ry make:request CreatePost
 ry make:seeder Users
+ry make:test Posts                 # feature test against the real router
 ```
 
 Names may be given singular or plural; `Post` and `Posts` both produce the
@@ -213,5 +362,8 @@ Names may be given singular or plural; `Post` and `Posts` both produce the
 ry build && go test ./...
 ```
 
-`ry build` runs view generation, so it catches template errors that `go build`
+{{ if .UsesVite }}`ry build` compiles the frontend before the Go build, so it catches the errors a
+`go build` on its own would leave for a visitor to find.
+{{ else }}`ry build` runs view generation, so it catches template errors that `go build`
 alone will not.
+{{ end }}

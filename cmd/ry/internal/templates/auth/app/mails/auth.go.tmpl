@@ -57,3 +57,57 @@ account was created.</p>
 `, appName, loginURL),
 	}
 }
+
+// ResetPassword carries the link that lets someone choose a new password.
+func ResetPassword(from mail.Address, to mail.Address, appName, link string) mail.Message {
+	return mail.Message{
+		From:    from,
+		To:      []mail.Address{to},
+		Subject: "Reset your password",
+		Text: fmt.Sprintf(`Somebody asked to reset the password on your %s account.
+
+Choose a new one here:
+
+%s
+
+The link is valid for one hour. If you did not ask for this, you can ignore
+this message — your password has not changed.
+`, appName, link),
+		HTML: fmt.Sprintf(`<p>Somebody asked to reset the password on your %s account.</p>
+<p><a href="%s">Choose a new password</a></p>
+<p>The link is valid for one hour. If you did not ask for this, you can ignore
+this message — your password has not changed.</p>
+`, appName, link),
+	}
+}
+
+// PasswordResetNoAccount is sent when a reset is requested for an address that
+// has no account.
+//
+// It is the counterpart of AccountExists, and it exists for the same reason:
+// the forgot-password form has to answer identically either way, so the
+// difference goes into the email instead of the page. Whoever submitted the
+// form learns nothing; the owner of the address learns that no account of
+// theirs is involved, which is usually the sign they signed up under a
+// different address.
+func PasswordResetNoAccount(from mail.Address, to mail.Address, appName, registerURL string) mail.Message {
+	return mail.Message{
+		From:    from,
+		To:      []mail.Address{to},
+		Subject: "Password reset requested",
+		Text: fmt.Sprintf(`Somebody asked to reset the password for a %s account with
+this email address, but no account uses it.
+
+If that was you, you may have signed up with a different address. You can also
+create an account here: %s
+
+If it was not, you can ignore this message. Nothing has changed.
+`, appName, registerURL),
+		HTML: fmt.Sprintf(`<p>Somebody asked to reset the password for a %s account with
+this email address, but no account uses it.</p>
+<p>If that was you, you may have signed up with a different address. You can
+also <a href="%s">create an account</a>.</p>
+<p>If it was not, you can ignore this message. Nothing has changed.</p>
+`, appName, registerURL),
+	}
+}

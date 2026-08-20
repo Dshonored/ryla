@@ -57,6 +57,9 @@ templ Login(form LoginForm) {
 					if form.Errors.Has("password") {
 						<p class="field-error">{ form.Errors.First("password") }</p>
 					}
+					<p class="muted small">
+						<a href="/forgot-password">Forgot your password?</a>
+					</p>
 				</div>
 
 				<div>

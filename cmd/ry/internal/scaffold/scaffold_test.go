@@ -186,8 +186,14 @@ func TestProjectValidation(t *testing.T) {
 		{name: "valid", project: "demo", mod: "github.com/you/demo", db: "sqlite", web: "mvc"},
 		{name: "empty name", project: "", mod: "demo", db: "sqlite", web: "mvc", wantErr: true},
 		{name: "unknown database", project: "demo", mod: "demo", db: "oracle", web: "mvc", wantErr: true},
-		{name: "unimplemented database", project: "demo", mod: "demo", db: "postgres", web: "mvc", wantErr: true},
-		{name: "unimplemented web mode", project: "demo", mod: "demo", db: "sqlite", web: "react", wantErr: true},
+		{name: "postgres", project: "demo", mod: "demo", db: "postgres", web: "mvc"},
+		{name: "mysql", project: "demo", mod: "demo", db: "mysql", web: "mvc"},
+		{name: "react", project: "demo", mod: "demo", db: "sqlite", web: "react"},
+		{name: "svelte", project: "demo", mod: "demo", db: "sqlite", web: "svelte"},
+		// Every option in both menus is implemented now, so the rejection of an
+		// unavailable one has no case left to cover. The branch stays because
+		// the next option to be sketched in will need it again.
+		{name: "unknown web mode", project: "demo", mod: "demo", db: "sqlite", web: "htmx", wantErr: true},
 	}
 
 	for _, tc := range tests {
@@ -209,6 +215,47 @@ func TestProjectOverlayOrder(t *testing.T) {
 	want := []string{"base", "db/sqlite", "web/mvc"}
 	if got := p.Overlays(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("Overlays() = %v, want %v", got, want)
+	}
+}
+
+// TestSharedOverlayIsAppliedBeforeTheMode protects the rule that lets react and
+// svelte share one server implementation: the shared overlay has to come first,
+// or a mode could not replace anything it defines, and the sharing would become
+// a constraint instead of a convenience.
+func TestSharedOverlayIsAppliedBeforeTheMode(t *testing.T) {
+	p, err := NewProject("demo", "demo", "sqlite", "react", "dev", "1.25")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"base", "db/sqlite", "web/spa", "web/react"}
+	if got := p.Overlays(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("Overlays() = %v, want %v", got, want)
+	}
+}
+
+// TestViteModesAreMarkedForTheManifest checks the flag that ends up in
+// ryla.yaml. Without it `ry dev` never starts Vite and `ry build` embeds
+// whatever happened to be in dist, which fails silently rather than loudly.
+func TestViteModesAreMarkedForTheManifest(t *testing.T) {
+	for _, tc := range []struct {
+		web  string
+		vite bool
+	}{
+		{web: "mvc", vite: false},
+		{web: "api", vite: false},
+		{web: "react", vite: true},
+		{web: "svelte", vite: true},
+	} {
+		t.Run(tc.web, func(t *testing.T) {
+			p, err := NewProject("demo", "demo", "sqlite", tc.web, "dev", "1.25")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.UsesVite != tc.vite {
+				t.Errorf("UsesVite = %v, want %v", p.UsesVite, tc.vite)
+			}
+		})
 	}
 }
 

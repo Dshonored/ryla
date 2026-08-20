@@ -1,0 +1,22 @@
+package requests
+
+// TwoFactorCode is the six-digit code from an authenticator app.
+//
+// The length rule gives nothing away: how many digits a TOTP code has is
+// printed in the otpauth URI the user already scanned. That is what makes this
+// different from the sign-in form, where a rule on the password field would
+// tell a guesser which candidates not to bother with.
+type TwoFactorCode struct {
+	Code string `form:"code" validate:"required,min=6,max=8,number"`
+}
+
+// TwoFactorRecovery is one of the codes issued at enrolment.
+//
+// No length or shape rule. The stored value is a hash, so the only thing that
+// can be said about a submitted code is whether it matches one — and a user
+// reading a code off a printout may well include the dash, drop it, or type it
+// in lower case. Rejecting any of those here would turn a working recovery code
+// into a lost account.
+type TwoFactorRecovery struct {
+	RecoveryCode string `form:"recovery_code" validate:"required,max=64"`
+}

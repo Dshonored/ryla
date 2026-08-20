@@ -113,8 +113,22 @@ is not attached by the browser automatically and so cannot be forged.
 **Sessions live in MongoDB**, so they can be revoked: deleting the document ends
 the session immediately, however many browsers hold the cookie. Expired ones are
 collected by a TTL index rather than a pruning job, which is why `app/schedule`
-ships empty here. `ry make:auth` is not available on MongoDB — its scaffold is
-written against GORM.
+ships empty here.
+
+**Authentication is hand-written in this project.** `ry make:auth` and
+`ry make:2fa` are written against GORM, and refuse to run on MongoDB rather than
+write a model and a migration this project cannot compile. The parts of the
+framework that are not tied to GORM still apply and are what to build on:
+`auth` for password hashing and verification, `session` for the session store
+(already wired), and `twofactor` for TOTP secrets, sealing and recovery codes.
+
+Two things do not carry over. The framework's `bearer` package — personal access
+tokens for API clients — is GORM-only, so token storage here has to be written
+against a collection of your own. And there is no generated User model, so the
+decisions the SQL scaffold makes for you are yours to make: a wrong password and
+an unknown email must produce the same message and take the same time, sign-in
+must regenerate the session id to close session fixation, and registration
+should not reveal whether an address is already known.
 
 **Background work goes in `app/jobs`.** A job is a struct whose exported
 fields are its payload, serialised on dispatch and restored before it runs.
@@ -154,6 +168,38 @@ durability is Redis's.
 on it. It is generated per project; the app refuses to start in production
 without one. Rotate with `ry key:generate --force`, which logs everyone out.
 
+**Tests drive the real application.** `tests/example_test.go` builds the whole
+app and makes requests through the router and its full middleware stack —
+sessions, CSRF, recovery — rather than calling a handler function. Add one with
+`ry make:test Posts`.
+
+    client(t).Get("/posts").AssertOK().AssertContains("First post")
+
+They need a server: there is no in-process MongoDB the way SQLite stands in for
+a SQL one, so they skip unless MONGO_TEST_URI names one, and every test is named
+`TestLive...` so CI can select them.
+
+    MONGO_TEST_URI=mongodb://localhost:27017 go test ./...
+
+`client(t)` hands back a browser-like client: its own cookies, the CSRF token
+attached to every unsafe request, and `Login(user.ID.Hex())` to start from a
+signed-in user. Assertions print the response body when they fail, which is
+usually the whole diagnosis. The application is built once per test binary
+against a database named `<app>_test`, which is dropped first — never point
+MONGO_TEST_URI at anything you want to keep.
+
+The helpers come from the framework's `testing` package, imported as `rytest`:
+`rytest.Env(t)` sets the environment and `rytest.New(t, cfg)` builds the client.
+`PostJSON`, `JSON` and `Delete` cover the non-form methods, and
+`AssertRedirect`, `AssertContains` and `AssertJSON` cover most of what a feature
+test needs to say. `rytest.Env` also sets the SQL variables, which this project
+ignores — set MONGO_URI after calling it.
+
+Keep new tests named `TestLive...` and keep them skipping when MONGO_TEST_URI is
+unset. A test that fails without a server makes `go test ./...` unusable on a
+laptop; one that is not named Live cannot be selected in CI, and a skip is
+indistinguishable from a pass in the summary line.
+
 **Views are compiled.** `.templ` files become Go, so a typo or a wrong argument
 is a build error rather than a blank page. Render through the controller's
 `Render` helper, which buffers output so a failed render becomes a clean 500
@@ -174,6 +220,7 @@ database/seeders/  ordered, called from Run
 resources/views/   .templ components
 resources/static/  embedded into the binary
 routes/            the route table
+tests/             feature tests through the real router
 cmd/app/           entrypoint: build the app, register routes, run
 ```
 
@@ -186,6 +233,7 @@ ry make:middleware EnsureAdmin
 ry make:job SendWelcomeEmail         # background job
 ry make:request CreatePost
 ry make:seeder Users
+ry make:test Posts                   # feature test against the real router
 ```
 
 Names may be given singular or plural; `Post` and `Posts` both produce the

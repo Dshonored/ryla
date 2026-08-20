@@ -1,0 +1,293 @@
+/* ---------------------------------------------------------------------------
+   {{.Name}} — design system
+
+   Tokens first, then base elements, then components. Everything below the
+   tokens is written against them, so changing the palette or the scale in one
+   place restyles the whole application.
+
+   This ships with the welcome page. Keep it and build on it, or replace it
+   wholesale — nothing in the framework depends on these class names.
+   --------------------------------------------------------------------------- */
+
+/* --- Tokens -------------------------------------------------------------- */
+
+:root {
+	color-scheme: light dark;
+
+	--bg: #fbfbfd;
+	--surface: #ffffff;
+	--surface-2: #f4f5f8;
+	--border: #e4e6ec;
+
+	--text: #14171c;
+	--text-muted: #5b6472;
+	--text-subtle: #8a93a2;
+
+	--accent: #2f6feb;
+	--accent-hover: #245bc7;
+	--accent-contrast: #ffffff;
+	--accent-subtle: #e8f0fe;
+
+	--success: #1a7f43;
+	--danger: #c02b2b;
+
+	--space-1: 0.25rem;
+	--space-2: 0.5rem;
+	--space-3: 0.75rem;
+	--space-4: 1rem;
+	--space-5: 1.5rem;
+	--space-6: 2rem;
+	--space-7: 3rem;
+
+	--text-sm: 0.875rem;
+	--text-lg: 1.125rem;
+	--text-xl: 1.5rem;
+	--text-2xl: 2rem;
+
+	--radius-sm: 6px;
+	--radius: 10px;
+	--radius-lg: 16px;
+
+	--font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+	--mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #0e1117;
+		--surface: #161b22;
+		--surface-2: #1c222b;
+		--border: #272e38;
+
+		--text: #e9edf3;
+		--text-muted: #a4aebc;
+		--text-subtle: #737d8c;
+
+		--accent: #5b8cff;
+		--accent-hover: #7ba2ff;
+		--accent-contrast: #0e1117;
+		--accent-subtle: #16233d;
+	}
+}
+
+/* --- Base ---------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--font);
+	line-height: 1.6;
+	-webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2 {
+	margin: 0;
+	line-height: 1.25;
+	letter-spacing: -0.01em;
+}
+
+h1 {
+	font-size: var(--text-2xl);
+}
+
+h2 {
+	font-size: var(--text-lg);
+}
+
+p {
+	margin: 0;
+}
+
+code {
+	font-family: var(--mono);
+	font-size: 0.9em;
+	background: var(--surface-2);
+	border-radius: var(--radius-sm);
+	padding: 0.15em 0.4em;
+}
+
+a {
+	color: var(--accent);
+}
+
+/* --- Layout -------------------------------------------------------------- */
+
+.container {
+	max-width: 60rem;
+	margin: 0 auto;
+	padding: var(--space-7) var(--space-5);
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-6);
+}
+
+.stack {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+}
+
+.row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-3);
+}
+
+.grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+	gap: var(--space-4);
+}
+
+/* --- Components ---------------------------------------------------------- */
+
+.card {
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	padding: var(--space-5);
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-4);
+}
+
+.muted {
+	color: var(--text-muted);
+}
+
+.subtle {
+	color: var(--text-subtle);
+	font-size: var(--text-sm);
+}
+
+.badge {
+	display: inline-block;
+	background: var(--accent-subtle);
+	color: var(--accent);
+	border-radius: 999px;
+	padding: 0 var(--space-3);
+	font-size: var(--text-sm);
+	font-weight: 600;
+}
+
+.facts {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: var(--space-2) var(--space-4);
+	font-size: var(--text-sm);
+	margin: 0;
+}
+
+.facts dt {
+	color: var(--text-muted);
+}
+
+.facts dd {
+	margin: 0;
+	font-family: var(--mono);
+}
+
+.counter {
+	font-size: var(--text-2xl);
+	font-variant-numeric: tabular-nums;
+	font-weight: 700;
+}
+
+button {
+	font: inherit;
+	font-weight: 600;
+	color: var(--accent-contrast);
+	background: var(--accent);
+	border: 1px solid transparent;
+	border-radius: var(--radius);
+	padding: var(--space-2) var(--space-4);
+	cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+	background: var(--accent-hover);
+}
+
+button:disabled {
+	opacity: 0.6;
+	cursor: progress;
+}
+
+button.secondary {
+	color: var(--text);
+	background: var(--surface-2);
+	border-color: var(--border);
+}
+
+label {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	font-size: var(--text-sm);
+	font-weight: 600;
+}
+
+input {
+	font: inherit;
+	font-weight: 400;
+	color: var(--text);
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: var(--space-2) var(--space-3);
+}
+
+input:focus-visible,
+button:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+.field-error {
+	color: var(--danger);
+	font-size: var(--text-sm);
+	font-weight: 400;
+}
+
+.notice {
+	border-radius: var(--radius);
+	padding: var(--space-3) var(--space-4);
+	font-size: var(--text-sm);
+	background: var(--surface-2);
+}
+
+.notice.success {
+	color: var(--success);
+}
+
+.notice.error {
+	color: var(--danger);
+}
+
+.endpoints {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: var(--text-sm);
+	font-family: var(--mono);
+}
+
+.endpoints th,
+.endpoints td {
+	text-align: left;
+	padding: var(--space-2) var(--space-3);
+	border-bottom: 1px solid var(--border);
+}
+
+.endpoints th {
+	color: var(--text-muted);
+	font-family: var(--font);
+}

@@ -1,0 +1,45 @@
+// Package migrations holds this application's schema migrations.
+//
+// Each migration is a file that registers itself from init, so importing this
+// package is enough to make every migration known to the runner:
+//
+//	func init() {
+//	    migrate.Register("20260101000000_create_users", up, down)
+//	}
+//
+// Create one with:
+//
+//	ry make:migration create_users
+//
+// This package lives in the database overlay rather than the base skeleton
+// because migrations are a SQL idea. The three that ship here create the tables
+// the framework's own database-backed session, queue and cache drivers expect,
+// so any SQL overlay has to carry an equivalent set; the MongoDB overlay
+// carries none at all, and declares indexes from the models instead.
+//
+// They are written against GORM's migrator rather than raw SQL, which is what
+// lets the same three files serve SQLite, Postgres and MySQL unchanged. Two
+// MySQL-specific things are worth knowing before you add a fourth.
+//
+// # Index key widths
+//
+// InnoDB caps an index key at 3072 bytes and utf8mb4 spends four bytes per
+// character, so 768 characters is the widest string column that can carry a
+// plain index. Nothing shipped here had to be narrowed: the cache table's
+// 255-character primary key and the users table's unique index on email come
+// to 1020 bytes each, and the composite index on jobs (queue, available_at) to
+// roughly 264. There is room, but not an unlimited amount of it — a
+// uniqueIndex on anything wider than size:768 is where this bites, and it
+// bites on MySQL alone.
+//
+// The older limit was 767 bytes, which 255 utf8mb4 characters already exceeds.
+// It applies to MySQL 5.6 and to tables left on the COMPACT row format; 5.7
+// and 8.0 default to DYNAMIC and to the larger limit.
+//
+// # Column types
+//
+// A []byte field with no size, as on the cache table's value column, becomes
+// longblob here and bytea on Postgres. Both hold far more than a cache entry
+// has any business holding, so the absence of a size tag is deliberate rather
+// than an oversight.
+package migrations

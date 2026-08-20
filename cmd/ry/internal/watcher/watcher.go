@@ -311,6 +311,19 @@ func ignored(root, path string, ignores []string) bool {
 		if ig == "" {
 			continue
 		}
+		// A bare name matches a directory at any depth, because the ones worth
+		// ignoring are not only at the root: a Vite project keeps node_modules
+		// and dist inside its frontend directory, and adding a node_modules to
+		// the watch is both pointless and enough directories to exhaust the
+		// operating system's watch limit. An entry containing a slash stays
+		// anchored to the project root, so a deliberately narrow ignore cannot
+		// quietly start matching somewhere else.
+		if !strings.Contains(ig, "/") {
+			if hasSegment(rel, ig) {
+				return true
+			}
+			continue
+		}
 		if rel == ig || strings.HasPrefix(rel, ig+"/") {
 			return true
 		}
@@ -318,6 +331,17 @@ func ignored(root, path string, ignores []string) bool {
 	// Hidden directories, but never the project root itself.
 	for _, part := range strings.Split(rel, "/") {
 		if len(part) > 1 && strings.HasPrefix(part, ".") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasSegment reports whether a slash-separated path contains name as one of its
+// segments.
+func hasSegment(rel, name string) bool {
+	for _, part := range strings.Split(rel, "/") {
+		if part == name {
 			return true
 		}
 	}

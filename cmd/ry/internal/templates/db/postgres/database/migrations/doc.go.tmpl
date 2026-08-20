@@ -1,0 +1,29 @@
+// Package migrations holds this application's schema migrations.
+//
+// Each migration is a file that registers itself from init, so importing this
+// package is enough to make every migration known to the runner:
+//
+//	func init() {
+//	    migrate.Register("20260101000000_create_users", up, down)
+//	}
+//
+// Create one with:
+//
+//	ry make:migration create_users
+//
+// This package lives in the database overlay rather than the base skeleton
+// because migrations are a SQL idea. The three that ship here create the tables
+// the framework's own database-backed session, queue and cache drivers expect,
+// so any SQL overlay has to carry an equivalent set; the MongoDB overlay
+// carries none at all, and declares indexes from the models instead.
+//
+// They are written against GORM's migrator rather than raw SQL, which is what
+// lets the same three files serve SQLite, Postgres and MySQL unchanged. On
+// Postgres a size:255 string becomes varchar(255), a []byte with no size
+// becomes bytea, and a time.Time becomes timestamptz — so timestamps come back
+// with a zone attached rather than as a bare wall-clock reading, which is the
+// one difference from SQLite likely to surprise anyone.
+//
+// Migrations run one per transaction and Postgres has transactional DDL, so a
+// migration that fails halfway leaves no partial table behind.
+package migrations

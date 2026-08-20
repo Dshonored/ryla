@@ -1,0 +1,104 @@
+package auth
+
+import (
+	"strconv"
+
+	"github.com/Dshonored/ryla/csrf"
+	"github.com/Dshonored/ryla/flash"
+	"github.com/Dshonored/ryla/validate"
+
+	"{{.Module}}/resources/views"
+)
+
+// TwoFactorChallengeForm carries the code entry page back after a failed
+// attempt.
+//
+// It never carries the submitted code. Echoing a one-time code into the page
+// puts it in the browser's back-forward cache and in any screenshot of the
+// error, and there is nothing to gain by it: the code has expired by the time
+// the page is read anyway.
+type TwoFactorChallengeForm struct {
+	RecoveryCodesLeft int
+	Errors            validate.ErrorBag
+	Messages          []flash.Message
+}
+
+templ TwoFactorChallenge(form TwoFactorChallengeForm) {
+	@views.Layout("Two-factor authentication") {
+		<div class="stack auth-card">
+			@views.Flashes(form.Messages)
+
+			<header class="stack-sm">
+				<h1>Enter your code</h1>
+				<p class="muted small">
+					Open your authenticator app and type the code it is
+					currently showing for this site.
+				</p>
+			</header>
+
+			<form method="post" action="/two-factor" class="stack-sm" novalidate>
+				@templ.Raw(csrf.Field(ctx))
+
+				<div class="field">
+					<label for="code">Six-digit code</label>
+					<input
+						id="code"
+						name="code"
+						type="text"
+						inputmode="numeric"
+						autocomplete="one-time-code"
+						autofocus
+						aria-invalid={ views.AriaInvalid(form.Errors, "code") }
+					/>
+					if form.Errors.Has("code") {
+						<p class="field-error">{ form.Errors.First("code") }</p>
+					}
+				</div>
+
+				<div>
+					<button class="btn" type="submit">Continue</button>
+				</div>
+			</form>
+
+			<details class="stack-sm">
+				<summary>Lost your phone?</summary>
+
+				<p class="muted small">
+					Use one of the recovery codes you saved when you turned this
+					on. Each one works once.
+					if form.RecoveryCodesLeft > 0 {
+						You have { strconv.Itoa(form.RecoveryCodesLeft) } left.
+					}
+				</p>
+
+				<form method="post" action="/two-factor/recovery" class="stack-sm" novalidate>
+					@templ.Raw(csrf.Field(ctx))
+
+					<div class="field">
+						<label for="recovery_code">Recovery code</label>
+						<input
+							id="recovery_code"
+							name="recovery_code"
+							type="text"
+							autocomplete="off"
+							spellcheck="false"
+							aria-invalid={ views.AriaInvalid(form.Errors, "recovery_code") }
+						/>
+						if form.Errors.Has("recovery_code") {
+							<p class="field-error">{ form.Errors.First("recovery_code") }</p>
+						}
+					</div>
+
+					<div>
+						<button class="btn" type="submit">Use recovery code</button>
+					</div>
+				</form>
+			</details>
+
+			<form method="post" action="/logout">
+				@templ.Raw(csrf.Field(ctx))
+				<button class="btn-link" type="submit">Sign in as somebody else</button>
+			</form>
+		</div>
+	}
+}

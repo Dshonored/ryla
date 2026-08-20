@@ -1,0 +1,12 @@
+import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
+
+// Svelte's own configuration, kept separate from vite.config.js because the
+// language tooling reads this file directly. Without it the plugin announces on
+// every start that it is falling back to defaults, in a terminal `ry dev` is
+// already using for something more useful.
+export default {
+	// Sends a <script lang="ts"> or <style lang="scss"> block through Vite's own
+	// transforms, so adding either is an npm install rather than a new build
+	// step to wire up.
+	preprocess: vitePreprocess(),
+};

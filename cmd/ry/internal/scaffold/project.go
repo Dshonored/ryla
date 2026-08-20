@@ -32,9 +32,17 @@ type Database struct {
 
 // WebMode describes one supported frontend style.
 type WebMode struct {
-	Name      string
-	Overlay   string
+	Name    string
+	Overlay string
+	// Shared is an overlay applied just before Overlay, holding what this mode
+	// has in common with another. react and svelte differ only in the frontend
+	// directory: the JSON server they sit in front of is one implementation, so
+	// it is one set of templates rather than two that drift apart.
+	Shared    string
 	UsesTempl bool
+	// UsesVite marks a mode whose frontend is compiled by Vite, which is what
+	// puts the vite flag in the generated ryla.yaml.
+	UsesVite  bool
 	Available bool
 	Summary   string
 }
@@ -61,18 +69,35 @@ var databases = []Database{
 		Summary:      "Documents rather than rows. No GORM and no migrations: indexes are declared in code.",
 	},
 	{
-		Name:         "postgres",
-		Overlay:      "db/postgres",
-		DefaultDSN:   "postgres://postgres:postgres@localhost:5432/%s?sslmode=disable",
+		Name:    "postgres",
+		Overlay: "db/postgres",
+		// The URL form rather than the space-separated keyword one: it is what
+		// every hosting provider hands out, so replacing this default means
+		// pasting one string. sslmode is stated outright because the driver's
+		// own default negotiates and falls back, which makes whether a local
+		// connection is encrypted depend on how the server was built.
+		DefaultDSN: "postgres://postgres:postgres@localhost:5432/%s?sslmode=disable",
+		// Postgres backs every connection with a process, so the pool is a real
+		// cost on the server rather than a client-side counter. 25 sits under
+		// the stock max_connections of 100 with room for a worker, a migration
+		// and a psql session alongside the web process.
 		MaxOpenConns: 25,
-		Summary:      "Not implemented yet.",
+		Available:    true,
+		Summary:      "A real server, and transactional DDL: a failed migration leaves nothing half-built.",
 	},
 	{
-		Name:         "mysql",
-		Overlay:      "db/mysql",
-		DefaultDSN:   "root:@tcp(localhost:3306)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		Name:    "mysql",
+		Overlay: "db/mysql",
+		// parseTime and charset are not optional in practice: without the first
+		// a DATETIME will not scan into a time.Time, and without the second the
+		// connection defaults to an encoding that cannot hold every rune.
+		DefaultDSN: "root:@tcp(localhost:3306)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		// Matched to Postgres for want of a reason to differ. MySQL threads are
+		// cheaper than Postgres processes and max_connections defaults to 151,
+		// so this is, if anything, conservative.
 		MaxOpenConns: 25,
-		Summary:      "Not implemented yet.",
+		Available:    true,
+		Summary:      "MariaDB too. DDL commits implicitly, so a failed migration is not rolled back.",
 	},
 }
 
@@ -84,9 +109,35 @@ var webModes = []WebMode{
 		Available: true,
 		Summary:   "Server-rendered pages with templ. Compile-checked views, no JS build step.",
 	},
-	{Name: "api", Overlay: "web/api", Summary: "Not implemented yet."},
-	{Name: "react", Overlay: "web/react", Summary: "Not implemented yet."},
-	{Name: "svelte", Overlay: "web/svelte", Summary: "Not implemented yet."},
+	{
+		Name:    "api",
+		Overlay: "web/api",
+		// No views at all, so there is nothing to generate: `ry new`, `ry dev`
+		// and `ry build` skip the templ step, and the project never takes on
+		// the dependency.
+		UsesTempl: false,
+		Available: true,
+		Summary:   "JSON endpoints and no views. The errors are JSON too, 404 and 500 included.",
+	},
+	{
+		Name:    "react",
+		Overlay: "web/react",
+		// The Go half of both single-page modes: a JSON API, and one handler
+		// that proxies to Vite while developing and serves the embedded build
+		// afterwards.
+		Shared:    "web/spa",
+		UsesVite:  true,
+		Available: true,
+		Summary:   "A React frontend built by Vite, embedded into the binary. JSON endpoints behind it.",
+	},
+	{
+		Name:      "svelte",
+		Overlay:   "web/svelte",
+		Shared:    "web/spa",
+		UsesVite:  true,
+		Available: true,
+		Summary:   "A Svelte frontend built by Vite, embedded into the binary. JSON endpoints behind it.",
+	},
 }
 
 // Databases lists every known database option.
@@ -159,6 +210,7 @@ type Project struct {
 	DefaultDSN     string
 	DBMaxOpenConns int
 	UsesTempl      bool
+	UsesVite       bool
 
 	// AppKey signs cookies. It is generated per project so a new application is
 	// never born with a shared or empty signing key.
@@ -214,16 +266,23 @@ func NewProject(name, module, dbName, webName, rylaVersion, goVersion string) (*
 		DefaultDSN:     fmt.Sprintf(db.DefaultDSN, naming.Kebab(name)),
 		DBMaxOpenConns: db.MaxOpenConns,
 		UsesTempl:      web.UsesTempl,
+		UsesVite:       web.UsesVite,
 		AppKey:         key,
 	}, nil
 }
 
 // Overlays returns the template overlays for this project, in application
-// order: base first, then database, then web mode.
+// order: base first, then database, then the web mode — preceded by whatever
+// that mode shares with another, so the mode's own files still win.
 func (p *Project) Overlays() []string {
 	db, _ := LookupDatabase(p.DB)
 	web, _ := LookupWebMode(p.Web)
-	return []string{"base", db.Overlay, web.Overlay}
+
+	overlays := []string{"base", db.Overlay}
+	if web.Shared != "" {
+		overlays = append(overlays, web.Shared)
+	}
+	return append(overlays, web.Overlay)
 }
 
 func validModule(module string) error {

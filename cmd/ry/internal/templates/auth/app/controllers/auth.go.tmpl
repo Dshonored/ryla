@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -24,7 +25,7 @@ import (
 	"{{.Module}}/resources/views/auth"
 )
 
-// Auth handles registration, sign-in and sign-out.
+// Auth handles registration, sign-in, sign-out and password resets.
 type Auth struct {
 	Base
 
@@ -306,4 +307,209 @@ func (c *Auth) serverError(w http.ResponseWriter, r *http.Request, what string, 
 // alice@example.com cannot become two accounts.
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// resetWindow is how long an emailed reset link stays usable.
+//
+// Short, because the link is a bearer credential sitting in a mailbox: anyone
+// holding it can take the account over. Long enough that somebody who reads
+// their email on another device still gets there in time.
+//
+// Nothing is stored server-side to mark a token spent, so a link keeps working
+// for the rest of the hour even after it has been used. Keeping the window
+// tight is what limits that; storing issued tokens is the alternative, and it
+// costs a table.
+const resetWindow = time.Hour
+
+// ShowForgotPassword handles GET /forgot-password.
+func (c *Auth) ShowForgotPassword(w http.ResponseWriter, r *http.Request) {
+	// Pulled here so the "that link has expired" message set by the reset
+	// handlers survives its redirect and is shown exactly once.
+	c.Render(w, r, auth.ForgotPassword(auth.ForgotPasswordForm{Messages: c.App.Flash.Pull(w, r)}))
+}
+
+// ForgotPassword handles POST /forgot-password.
+//
+// Like Register, the response is the same whether or not the address has an
+// account: "check your inbox", every time. Answering "no account with that
+// address" would turn this form into the account-discovery tool the sign-in
+// form deliberately refuses to be — and it sits one page away from that form,
+// so the leak would be just as useful.
+//
+// Both branches send an email, so the sentence on the page is true either way;
+// the difference goes into the message rather than the response.
+func (c *Auth) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var form requests.ForgotPassword
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		http.Error(w, "Could not read the submitted form.", http.StatusBadRequest)
+		return
+	}
+	form.Email = normalizeEmail(form.Email)
+
+	if bag.Any() {
+		c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.ForgotPassword(auth.ForgotPasswordForm{
+			Email: form.Email, Errors: bag,
+		}))
+		return
+	}
+
+	var user models.User
+	err = c.App.DB.Where("email = ?", form.Email).First(&user).Error
+
+	switch {
+	case err == nil:
+		c.sendResetLink(r, user)
+
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		c.sendResetNoAccount(r, form.Email)
+
+	default:
+		c.serverError(w, r, "look up user", err)
+		return
+	}
+
+	c.App.Flash.Add(w, r, flash.Info,
+		"Check your inbox — we have sent a link to "+form.Email+".")
+	c.Redirect(w, r, "/login")
+}
+
+// sendResetLink emails the signed link for a real account.
+func (c *Auth) sendResetLink(r *http.Request, user models.User) {
+	// PurposeResetPassword, so this token cannot be handed to /verify to
+	// confirm an address, and a confirmation link cannot be handed here to
+	// change a password.
+	token := c.App.Signer.Sign(ryauth.PurposeResetPassword, strconv.FormatUint(uint64(user.ID), 10), resetWindow)
+	link := c.App.Config.URL + "/reset-password?token=" + url.QueryEscape(token)
+
+	msg := mails.ResetPassword(c.App.From(), mail.Address{Name: user.Name, Email: user.Email},
+		c.App.Config.Name, link)
+
+	if err := c.App.Mail.Send(r.Context(), msg); err != nil {
+		// Logged rather than surfaced: telling the browser the send failed
+		// would answer differently for an address that has an account, which
+		// is the whole point of this handler answering identically.
+		c.App.Log.Error("could not send the password reset email", "error", err, "user", user.ID)
+	}
+}
+
+// sendResetNoAccount tells the owner of an unregistered address what happened.
+func (c *Auth) sendResetNoAccount(r *http.Request, email string) {
+	msg := mails.PasswordResetNoAccount(c.App.From(), mail.Address{Email: email},
+		c.App.Config.Name, c.App.Config.URL+"/register")
+
+	if err := c.App.Mail.Send(r.Context(), msg); err != nil {
+		c.App.Log.Error("could not send the no-account password reset email", "error", err)
+	}
+}
+
+// ShowResetPassword handles GET /reset-password.
+//
+// The token is checked before the form is drawn, so a stale link says so
+// straight away rather than after somebody has chosen and typed a new password
+// twice.
+func (c *Auth) ShowResetPassword(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if _, err := c.App.Signer.Verify(ryauth.PurposeResetPassword, token); err != nil {
+		c.expiredResetLink(w, r)
+		return
+	}
+
+	c.Render(w, r, auth.ResetPassword(auth.ResetPasswordForm{Token: token}))
+}
+
+// ResetPassword handles POST /reset-password.
+func (c *Auth) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var form requests.ResetPassword
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		http.Error(w, "Could not read the submitted form.", http.StatusBadRequest)
+		return
+	}
+	if bag.Any() {
+		c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.ResetPassword(auth.ResetPasswordForm{
+			Token: form.Token, Errors: bag,
+		}))
+		return
+	}
+
+	// Re-checked on submit, never trusted from the hidden field alone: the
+	// signature is what proves the person at this form was sent the email, and
+	// the expiry has to be judged now rather than when the page was drawn.
+	subject, err := c.App.Signer.Verify(ryauth.PurposeResetPassword, form.Token)
+	if err != nil {
+		c.expiredResetLink(w, r)
+		return
+	}
+
+	id, err := strconv.ParseUint(subject, 10, 64)
+	if err != nil {
+		c.expiredResetLink(w, r)
+		return
+	}
+
+	var user models.User
+	if err := c.App.DB.First(&user, uint(id)).Error; err != nil {
+		c.expiredResetLink(w, r)
+		return
+	}
+
+	hash, err := ryauth.Hash(form.Password)
+	if err != nil {
+		c.serverError(w, r, "hash the new password", err)
+		return
+	}
+
+	fields := map[string]any{"password": hash}
+	if !user.Verified() {
+		// Opening the emailed link proves control of the address, which is the
+		// same evidence /verify accepts. Leaving it unconfirmed afterwards
+		// would be a state nothing else can clear.
+		fields["email_verified_at"] = time.Now()
+	}
+	if err := c.App.DB.Model(&user).Updates(fields).Error; err != nil {
+		c.serverError(w, r, "store the new password", err)
+		return
+	}
+
+	c.signOutEverywhere(user)
+
+	c.App.Flash.Add(w, r, flash.Success, "Your password has been changed. Sign in with it.")
+	c.Redirect(w, r, "/login")
+}
+
+// signOutEverywhere ends every session belonging to the user.
+//
+// A reset is usually the answer to a compromise, so an attacker still holding a
+// live session would keep exactly the access the reset was meant to take away —
+// and could simply set the password again. Only a server-side store keeps the
+// records this needs; a cookie store has nothing to revoke, so say so in the log
+// rather than let an operator believe the sessions were ended.
+func (c *Auth) signOutEverywhere(user models.User) {
+	store, ok := c.App.Session.(*session.DBStore)
+	if !ok {
+		c.App.Log.Warn("password reset could not end the user's other sessions: this session store keeps no server-side record to revoke",
+			"user", user.ID, "store", fmt.Sprintf("%T", c.App.Session))
+		return
+	}
+
+	if err := store.DestroyForUser(strconv.FormatUint(uint64(user.ID), 10)); err != nil {
+		// The password is already changed, so failing the request now would be
+		// misleading. The sessions that survive are the cost, and the log is
+		// what makes that visible.
+		c.App.Log.Error("could not end the user's other sessions after a password reset", "error", err, "user", user.ID)
+	}
+}
+
+// expiredResetLink sends the visitor back to ask for a fresh link.
+//
+// One message for expired, forged and pointing-at-a-deleted-account alike:
+// separating them would let anyone with a token generator learn which user ids
+// exist.
+func (c *Auth) expiredResetLink(w http.ResponseWriter, r *http.Request) {
+	c.App.Flash.Add(w, r, flash.Error,
+		"That reset link is invalid or has expired. Ask for a new one.")
+	c.Redirect(w, r, "/forgot-password")
 }

@@ -1,0 +1,132 @@
+// Package tests holds the application's feature tests.
+//
+// A feature test drives the application the way a browser does: the request
+// goes through the real router and the whole middleware stack — sessions, CSRF,
+// logging, recovery — rather than calling a handler function directly. That is
+// what makes one worth writing. A handler called in isolation cannot tell you
+// that its route is registered, that the middleware order is right, or that the
+// form it renders is accepted by the CSRF check.
+//
+// These need a MongoDB server. There is no in-process MongoDB the way SQLite
+// stands in for a SQL server, so they run where one exists and are skipped
+// elsewhere rather than silently testing nothing. Every name starts with Live
+// so that CI can select them with `go test -run Live ./...`:
+//
+//	MONGO_TEST_URI=mongodb://localhost:27017 go test ./...
+package tests
+
+import (
+	"context"
+	"os"
+	"sync"
+	"testing"
+
+	rymongo "{{.RylaModule}}/mongo"
+	rytest "{{.RylaModule}}/testing"
+
+	"{{.Module}}/app"
+	"{{.Module}}/routes"
+)
+
+var (
+	buildOnce sync.Once
+	built     *app.App
+)
+
+// application builds the whole application against a throwaway database with
+// the declared indexes applied.
+//
+// Once for the test binary, not once per test: jobs and named routes register
+// themselves into process-wide registries that refuse a duplicate, so a second
+// app.New in the same process panics rather than quietly costing time. The
+// trade is that tests share one database — clean up anything you write, or read
+// it back through a fresh client rather than assuming an empty collection.
+func application(t *testing.T) *app.App {
+	t.Helper()
+
+	uri := os.Getenv("MONGO_TEST_URI")
+	if uri == "" {
+		t.Skip("skipping: set MONGO_TEST_URI to run the application's feature tests")
+	}
+
+	buildOnce.Do(func() {
+		// Fills in a configuration that is safe to test against: a published
+		// signing key, mail that is logged rather than sent, and no queue
+		// worker needed. Its SQL settings are ignored here. Real environment
+		// variables beat .env, so this wins over the file.
+		rytest.Env(t)
+		t.Setenv("MONGO_URI", uri)
+		// Never the development database: these tests drop it.
+		t.Setenv("MONGO_DATABASE", "{{.Name | snake}}_test")
+
+		a, err := app.New()
+		if err != nil {
+			t.Fatalf("build the application: %v", err)
+		}
+
+		ctx := context.Background()
+		if err := a.DB.Drop(ctx); err != nil {
+			t.Fatalf("drop the test database: %v", err)
+		}
+		if err := rymongo.NewSyncer(a.DB, a.Log).Sync(ctx); err != nil {
+			t.Fatalf("create the declared indexes: %v", err)
+		}
+
+		// The same call cmd/app makes. Without it the router has no routes and
+		// every request below would answer 404.
+		routes.Register(a)
+
+		built = a
+	})
+
+	if built == nil {
+		t.Fatal("the application could not be built; see the failure above")
+	}
+	return built
+}
+
+// client returns a browser-like client with its own cookie jar, so a test can
+// never arrive already signed in because a different one logged in.
+//
+// It carries the application's CSRF token on every unsafe request, so a POST to
+// a real form route works without hand-building one. To start from a signed-in
+// user — which most tests worth writing do — call client(t).Login(user.ID.Hex()).
+func client(t *testing.T) *rytest.Client {
+	t.Helper()
+
+	a := application(t)
+	return rytest.New(t, rytest.Config{
+		Handler: a.Router,
+		Jar:     a.Cookies,
+		Session: a.Session,
+	})
+}
+
+// TestLiveTheHomePageRenders is the smallest end-to-end proof there is: the
+// application boots, the route is registered, and the view compiles and renders.
+func TestLiveTheHomePageRenders(t *testing.T) {
+	a := application(t)
+
+	client(t).Get("/").
+		AssertOK().
+		AssertContains(a.Config.Name)
+}
+
+// TestLiveTheHealthEndpointReportsOK covers the route a load balancer polls. It
+// is the one endpoint whose contract belongs to something outside this
+// codebase, so a change to its shape should break a test rather than a
+// deployment.
+func TestLiveTheHealthEndpointReportsOK(t *testing.T) {
+	var body struct {
+		Status string `json:"status"`
+	}
+
+	client(t).Get("/up").
+		AssertOK().
+		AssertHeader("Content-Type", "application/json").
+		AssertJSON(&body)
+
+	if body.Status != "ok" {
+		t.Errorf("status = %q, want ok", body.Status)
+	}
+}
