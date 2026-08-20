@@ -10,13 +10,22 @@ facades, no service container and no runtime resolution. `ry` generates real Go
 files you can read, step through and delete.
 
 ```bash
-go install github.com/Dshonored/ryla/cmd/ry@latest
+curl -fsSL https://raw.githubusercontent.com/Dshonored/ryla/main/install.sh | sh
 
 ry new myapp
 cd myapp
 ry migrate
 ry dev
 ```
+
+The script installs a Go toolchain if the machine has none, installs `ry`, and
+adds both to your shell's PATH, on macOS and Linux. Go is not optional for a Go
+framework — `ry dev` shells out to it on every save — so installing it is part
+of installing Ryla rather than a prerequisite to read about first. Re-running
+the script updates `ry` in place.
+
+Already have Go, or on Windows? `go install github.com/Dshonored/ryla/cmd/ry@latest`
+does the same job, and `ry update --self` keeps it current afterwards.
 
 ## The CLI
 

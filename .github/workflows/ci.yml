@@ -46,6 +46,18 @@ jobs:
       - name: Test
         run: go test ./...
 
+  # The install script is the documented way onto a machine that has no Go, so
+  # it cannot be checked by anything that assumes a Go toolchain. `go test`
+  # covers its version drift; this covers the shell itself.
+  install-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shellcheck the installer
+        run: shellcheck --shell=sh install.sh
+
   # MongoDB integration tests, on their own job because service containers only
   # exist on the Linux runners. Without this the live tests would skip
   # everywhere and quietly test nothing.
