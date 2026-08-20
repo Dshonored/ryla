@@ -59,7 +59,15 @@ func TestTwoFactorScaffoldCompiles(t *testing.T) {
 
 	stub := scaffold.NewStub("demo", "User")
 
-	auth := &scaffold.Generator{FS: templates.FS, Overlays: []string{"auth"}, Dest: dir, Data: stub}
+	// The same overlays `ry make:auth` would choose, rather than a copy of the
+	// list: two-factor is generated on top of that scaffold, so it has to be
+	// the real one.
+	authOverlays, err := scaffold.AuthOverlays("mvc", "sqlite")
+	if err != nil {
+		t.Fatalf("choose auth overlays: %v", err)
+	}
+
+	auth := &scaffold.Generator{FS: templates.FS, Overlays: authOverlays, Dest: dir, Data: stub}
 	if _, err := auth.Run(); err != nil {
 		t.Fatalf("generate auth: %v", err)
 	}
@@ -91,6 +99,12 @@ func TestTwoFactorScaffoldCompiles(t *testing.T) {
 	}
 
 	addTwoFactorFieldsToUser(t, ctx, dir)
+
+	// Both generators print a line to add rather than editing the route table,
+	// so both lines have to be added here. Without them the scaffolds compile
+	// as unreachable code, and the feature tests they ship would be asserting
+	// against routes that do not exist.
+	registerRoutes(t, dir, "RegisterAuth(a)", "RegisterTwoFactor(a)")
 
 	run(t, ctx, dir, "go", "mod", "edit",
 		"-replace="+scaffold.RylaModule+"="+root,
@@ -270,5 +284,27 @@ func TestTheCommandIsUsable(t *testing.T) {
 	}
 	if cmd.Flags().Lookup("force") == nil {
 		t.Error("the command has no --force flag, so a re-run cannot overwrite")
+	}
+}
+
+// registerRoutes adds the calls the generators print, inside Register.
+func registerRoutes(t *testing.T, dir string, calls ...string) {
+	t.Helper()
+
+	path := filepath.Join(dir, "routes", "web.go")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read routes: %v", err)
+	}
+
+	const anchor = "func Register(a *app.App) {"
+	body := string(raw)
+	if !strings.Contains(body, anchor) {
+		t.Fatalf("routes/web.go has no %q to hook into", anchor)
+	}
+
+	body = strings.Replace(body, anchor, anchor+"\n\t"+strings.Join(calls, "\n\t")+"\n", 1)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write routes: %v", err)
 	}
 }

@@ -1,0 +1,139 @@
+package controllers
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	rymongo "{{.RylaModule}}/mongo"
+
+	"{{.Module}}/app/models"
+)
+
+// The two outcomes a lookup has that are not failures. They are declared here
+// rather than returned as the driver's own errors so that the flow in
+// auth_core.go reads the same whichever database this project uses — and so
+// that swapping one for the other is this file, not every branch above it.
+var (
+	// errNoUser means nothing matched. The handlers answer identically whether
+	// or not an account exists, so this decides what to send, never what to say.
+	errNoUser = errors.New("no such user")
+	// errUserExists means the unique index rejected an insert. Two signups for
+	// one address can both pass a check; only the index settles it.
+	errUserExists = errors.New("user already exists")
+)
+
+// userStore is every database operation the authentication flow performs.
+//
+// The flow itself knows none of this. That is what lets one set of handlers
+// serve MongoDB and GORM alike: the queries differ completely, the decisions
+// built on them do not.
+type userStore struct {
+	users *rymongo.Collection[models.User]
+}
+
+func newUserStore(db *rymongo.Database) userStore {
+	return userStore{users: rymongo.For[models.User](db, models.UserCollection)}
+}
+
+// FindByEmail looks an account up by address, returning errNoUser when there is
+// none.
+func (s userStore) FindByEmail(ctx context.Context, email string) (models.User, error) {
+	user, err := s.users.FindOne(ctx, rymongo.Filter{"email": email})
+	if errors.Is(err, rymongo.ErrNotFound) {
+		return models.User{}, errNoUser
+	}
+	if err != nil {
+		return models.User{}, err
+	}
+	return *user, nil
+}
+
+// FindByID looks an account up by the identifier carried in a signed link or a
+// session.
+func (s userStore) FindByID(ctx context.Context, id string) (models.User, error) {
+	key, err := models.ParseUserID(id)
+	if err != nil {
+		// A subject that is not an id at all cannot name a user, and reporting
+		// that differently from "no such user" would tell anyone with a token
+		// generator which ids are even well-formed.
+		return models.User{}, errNoUser
+	}
+
+	user, err := s.users.FindByID(ctx, key)
+	if errors.Is(err, rymongo.ErrNotFound) {
+		return models.User{}, errNoUser
+	}
+	if err != nil {
+		return models.User{}, err
+	}
+	return *user, nil
+}
+
+// Create stores a new account, reporting errUserExists when the address is
+// taken.
+func (s userStore) Create(ctx context.Context, user *models.User) error {
+	user.Touch()
+
+	id, err := s.users.Insert(ctx, user)
+	if rymongo.IsDuplicate(err) {
+		return errUserExists
+	}
+	if err != nil {
+		return err
+	}
+
+	// Insert reports the id the server minted rather than writing it back, and
+	// everything after this — the session, the verification link — is addressed
+	// by it.
+	user.ID = id
+	return nil
+}
+
+// MarkVerified records that the address has been confirmed.
+func (s userStore) MarkVerified(ctx context.Context, user *models.User) error {
+	now := time.Now()
+
+	_, err := s.users.UpdateByID(ctx, user.ID, rymongo.NowUpdate(rymongo.Update{
+		"email_verified_at": now,
+	}))
+	if err != nil {
+		return err
+	}
+
+	user.EmailVerifiedAt = &now
+	return nil
+}
+
+// SetPassword stores a new hash, and confirms the address at the same time when
+// verify is set.
+//
+// One update rather than two: a reset that changed the password and then failed
+// to record the confirmation would leave the account in a state nothing else
+// clears.
+func (s userStore) SetPassword(ctx context.Context, user *models.User, hash string, verify bool) error {
+	fields := rymongo.Update{"password": hash}
+
+	now := time.Now()
+	if verify {
+		fields["email_verified_at"] = now
+	}
+
+	if _, err := s.users.UpdateByID(ctx, user.ID, rymongo.NowUpdate(fields)); err != nil {
+		return err
+	}
+
+	user.Password = hash
+	if verify {
+		user.EmailVerifiedAt = &now
+	}
+	return nil
+}
+
+// UpgradeHash re-stores a password verified against outdated parameters.
+//
+// Failure is not worth surfacing: the sign-in it happened during succeeded, and
+// the same hash will be offered for upgrade again next time.
+func (s userStore) UpgradeHash(ctx context.Context, user *models.User, hash string) {
+	_, _ = s.users.UpdateByID(ctx, user.ID, rymongo.NowUpdate(rymongo.Update{"password": hash}))
+}

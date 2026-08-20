@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // User is an account that can sign in.
 type User struct {
@@ -22,6 +25,22 @@ type User struct {
 
 // Verified reports whether the email address has been confirmed.
 func (u User) Verified() bool { return u.EmailVerifiedAt != nil }
+
+// SessionID is the identifier a session and a signed link carry.
+//
+// A string, because both are text by the time they are stored, and because a
+// document store's id is not a number: keeping the seam here is what lets the
+// authentication handlers be written once for either.
+func (u User) SessionID() string { return strconv.FormatUint(uint64(u.ID), 10) }
+
+// ParseUserID turns that string back into a primary key.
+func ParseUserID(id string) (uint, error) {
+	n, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return uint(n), nil
+}
 
 // TableName pins the table name so GORM's pluralisation can never drift from
 // what the migrations created.

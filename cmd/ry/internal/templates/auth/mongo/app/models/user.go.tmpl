@@ -1,0 +1,67 @@
+package models
+
+import (
+	"time"
+
+	"go.mongodb.org/mongo-driver/v2/bson"
+
+	rymongo "{{.RylaModule}}/mongo"
+)
+
+// UserCollection is where accounts are stored. It is a constant because the
+// indexes below are declared from init, before any User exists to be asked
+// where it lives.
+const UserCollection = "users"
+
+// User is an account that can sign in.
+//
+// The bson tags are the field names as MongoDB stores them, and they are what
+// every query and index has to match. The Go field name is not, so renaming a
+// field without its tag changes nothing on the server.
+type User struct {
+	// omitempty is what lets the server mint the id on insert: a zero ObjectID
+	// written out literally would make every new account collide on _id.
+	ID    bson.ObjectID `bson:"_id,omitempty" json:"id"`
+	Name  string        `bson:"name" json:"name"`
+	Email string        `bson:"email" json:"email"`
+
+	// Password holds an argon2id hash, never a plaintext password. The json
+	// tag hides it, so a User serialised into a response cannot leak it.
+	Password string `bson:"password" json:"-"`
+
+	// EmailVerifiedAt is nil until the address has been confirmed by following
+	// the link that was emailed to it.
+	EmailVerifiedAt *time.Time `bson:"email_verified_at,omitempty" json:"email_verified_at"`
+
+	rymongo.Timestamps `bson:",inline"`
+}
+
+// Verified reports whether the email address has been confirmed.
+func (u User) Verified() bool { return u.EmailVerifiedAt != nil }
+
+// SessionID is the identifier a session and a signed link carry.
+//
+// A string, because both are text by the time they are stored: keeping the
+// seam here is what lets the authentication handlers be written once for a
+// document store and a SQL one alike.
+func (u User) SessionID() string { return u.ID.Hex() }
+
+// ParseUserID turns that string back into a document id.
+func ParseUserID(id string) (bson.ObjectID, error) { return bson.ObjectIDFromHex(id) }
+
+func init() {
+	rymongo.Register(
+		// Unique, and not merely checked before an insert: two concurrent
+		// signups for one address both pass a check, and only the index
+		// rejects the second. The whole no-duplicate-accounts guarantee rests
+		// on this line rather than on the code that reads it.
+		rymongo.Index{
+			Collection: UserCollection,
+			Keys: bson.D{
+				{Key: "email", Value: 1},
+			},
+			Name:   "users_email",
+			Unique: true,
+		},
+	)
+}

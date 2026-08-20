@@ -1,0 +1,298 @@
+package controllers
+
+import (
+	"errors"
+	"net/http"
+	"strconv"
+
+	ryauth "{{.RylaModule}}/auth"
+	"{{.RylaModule}}/validate"
+
+	"{{.Module}}/app"
+	appmw "{{.Module}}/app/middleware"
+	"{{.Module}}/app/models"
+	"{{.Module}}/app/requests"
+)
+
+// Auth answers the authentication endpoints as JSON.
+//
+// It decides nothing. Every rule worth getting right — what is revealed when an
+// address is unknown, when a hash is upgraded, how long a reset link lives — is
+// in authCore, which the server-rendered pages use too, so a project that grows
+// a second front end cannot end up with two flows that disagree.
+//
+// The session is an ordinary cookie, the same one the rest of the application
+// uses. That is deliberate for a browser client: the cookie is HttpOnly, so a
+// script that manages to run on your page cannot read the credential, which is
+// not true of a token kept in local storage. The cost is that these endpoints
+// are reachable with ambient credentials, which is exactly why the CSRF check
+// in app.go looks at the cookie rather than the path.
+type Auth struct {
+	Base
+	authCore
+}
+
+// NewAuth builds the controller.
+func NewAuth(a *app.App) *Auth {
+	return &Auth{Base: Base{App: a}, authCore: newAuthCore(a)}
+}
+
+// userResponse is the account as a client is allowed to see it.
+//
+// Built by hand rather than by serialising the model, so a column added later —
+// a password reset token, an internal flag, a note from support — cannot start
+// appearing in responses because somebody forgot a json tag.
+type userResponse struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Email    string `json:"email"`
+	Verified bool   `json:"verified"`
+}
+
+func newUserResponse(u models.User) userResponse {
+	return userResponse{
+		ID:       u.SessionID(),
+		Name:     u.Name,
+		Email:    u.Email,
+		Verified: u.Verified(),
+	}
+}
+
+// Register handles POST /api/auth/register.
+//
+// It answers 202 with the same body whether the address was free or already
+// taken. A 201-or-409 pair would be a well-behaved API and an account-discovery
+// oracle: anyone could walk a list of addresses through it and learn which are
+// registered. What actually happened goes to the address itself, by email.
+func (c *Auth) Register(w http.ResponseWriter, r *http.Request) {
+	var form requests.Register
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		c.Error(w, r, http.StatusBadRequest, "Could not read the request body.")
+		return
+	}
+	form.Email = normalizeEmail(form.Email)
+
+	if bag.Any() {
+		c.Invalid(w, r, bag)
+		return
+	}
+
+	if err := c.authCore.Register(r, form); err != nil {
+		c.serverError(w, r, "register the account", err)
+		return
+	}
+
+	c.JSON(w, r, http.StatusAccepted, map[string]string{
+		"message": "Check your inbox — we have sent a link to " + form.Email + ".",
+	})
+}
+
+// Verify handles GET /api/auth/verify.
+//
+// A GET, and not under the client's control: this is the address the emailed
+// link points at, so it is followed by a mail client rather than called by the
+// application. It answers JSON like everything else here; a browser landing on
+// it directly sees the JSON, which is why the frontend should own /verify as a
+// page and call this from it with the token.
+func (c *Auth) Verify(w http.ResponseWriter, r *http.Request) {
+	user, err := c.authCore.Verify(w, r, r.URL.Query().Get("token"))
+	switch {
+	case errors.Is(err, errInvalidLink):
+		c.Error(w, r, http.StatusUnprocessableEntity,
+			"That confirmation link is invalid or has expired. Sign up again to get a new one.")
+		return
+	case err != nil:
+		c.serverError(w, r, "confirm the address", err)
+		return
+	}
+
+	c.JSON(w, r, http.StatusOK, map[string]any{"user": newUserResponse(user)})
+}
+
+// Login handles POST /api/auth/login.
+func (c *Auth) Login(w http.ResponseWriter, r *http.Request) {
+	var form requests.Login
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		c.Error(w, r, http.StatusBadRequest, "Could not read the request body.")
+		return
+	}
+	if bag.Any() {
+		c.Invalid(w, r, bag)
+		return
+	}
+	form.Email = normalizeEmail(form.Email)
+
+	user, err := c.authCore.Login(w, r, form)
+
+	var throttled errThrottled
+	switch {
+	case errors.As(err, &throttled):
+		// The header as well as the message, so a client that retries on its
+		// own has something to read without parsing English.
+		w.Header().Set("Retry-After", strconv.Itoa(int(throttled.RetryAfter.Seconds())+1))
+		WriteError(w, r, http.StatusTooManyRequests,
+			"Too many sign-in attempts. Try again in a few minutes.",
+			credentialErrors("Too many sign-in attempts. Try again in a few minutes."))
+		return
+
+	case errors.Is(err, errBadCredentials):
+		// 422 with the message on a field, so a form can put it under the
+		// inputs exactly as a validation failure would appear.
+		WriteError(w, r, http.StatusUnprocessableEntity,
+			"Those credentials do not match our records.",
+			credentialErrors("Those credentials do not match our records."))
+		return
+
+	case err != nil:
+		c.serverError(w, r, "sign in", err)
+		return
+	}
+
+	c.JSON(w, r, http.StatusOK, map[string]any{
+		"user": newUserResponse(user),
+		// Where the client was headed before it was sent to sign in. The
+		// server remembers it because the redirect that interrupted them
+		// happened here.
+		"intended": c.Intended(r, "/"),
+	})
+}
+
+// Logout handles POST /api/auth/logout.
+func (c *Auth) Logout(w http.ResponseWriter, r *http.Request) {
+	c.authCore.Logout(w, r)
+	c.NoContent(w, r)
+}
+
+// Me handles GET /api/auth/me.
+//
+// The endpoint a single-page application calls as it starts, to find out
+// whether the cookie it already holds belongs to anyone. 401 rather than an
+// empty 200: "not signed in" is the answer, and a client should not have to
+// inspect a body to discover it.
+func (c *Auth) Me(w http.ResponseWriter, r *http.Request) {
+	user := appmw.User(r.Context())
+	if user == nil {
+		c.Error(w, r, http.StatusUnauthorized, "Not signed in.")
+		return
+	}
+
+	c.JSON(w, r, http.StatusOK, map[string]any{"user": newUserResponse(*user)})
+}
+
+// ForgotPassword handles POST /api/auth/forgot-password.
+//
+// Answers 202 for an unknown address as readily as a known one, for the same
+// reason Register does.
+func (c *Auth) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var form requests.ForgotPassword
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		c.Error(w, r, http.StatusBadRequest, "Could not read the request body.")
+		return
+	}
+	form.Email = normalizeEmail(form.Email)
+
+	if bag.Any() {
+		c.Invalid(w, r, bag)
+		return
+	}
+
+	if err := c.authCore.ForgotPassword(r, form); err != nil {
+		c.serverError(w, r, "look up the account", err)
+		return
+	}
+
+	c.JSON(w, r, http.StatusAccepted, map[string]string{
+		"message": "Check your inbox — we have sent a link to " + form.Email + ".",
+	})
+}
+
+// CheckResetToken handles GET /api/auth/reset-password.
+//
+// It lets the page behind an emailed link say the link is stale before somebody
+// chooses and types a new password twice. It reports nothing about the account
+// the token names — only whether it is still worth filling the form in.
+func (c *Auth) CheckResetToken(w http.ResponseWriter, r *http.Request) {
+	if err := c.authCore.CheckResetToken(r.URL.Query().Get("token")); err != nil {
+		c.Error(w, r, http.StatusUnprocessableEntity,
+			"That reset link is invalid or has expired. Ask for a new one.")
+		return
+	}
+
+	c.JSON(w, r, http.StatusOK, map[string]bool{"valid": true})
+}
+
+// ResetPassword handles POST /api/auth/reset-password.
+func (c *Auth) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var form requests.ResetPassword
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		c.Error(w, r, http.StatusBadRequest, "Could not read the request body.")
+		return
+	}
+	if bag.Any() {
+		c.Invalid(w, r, bag)
+		return
+	}
+
+	_, err = c.authCore.ResetPassword(r, form)
+	switch {
+	case errors.Is(err, errInvalidLink):
+		c.Error(w, r, http.StatusUnprocessableEntity,
+			"That reset link is invalid or has expired. Ask for a new one.")
+		return
+	case err != nil:
+		c.serverError(w, r, "store the new password", err)
+		return
+	}
+
+	// Deliberately not signed in afterwards, and every other session ended:
+	// a reset is usually the answer to a compromise, so the next step is
+	// proving the new password, not being handed a session.
+	c.JSON(w, r, http.StatusOK, map[string]string{
+		"message": "Your password has been changed. Sign in with it.",
+	})
+}
+
+// RequireGuest refuses a request that is already signed in.
+//
+// The framework's RequireGuest redirects, which is the right answer for a page
+// and the wrong one for a client that parses every response: a 302 to an HTML
+// login page is not something a fetch() can act on. This says the same thing in
+// the shape the rest of this API uses.
+func (c *Auth) RequireGuest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if ryauth.CheckRequest(r) {
+			c.Error(w, r, http.StatusForbidden, "Already signed in.")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequireAuth refuses a request that is not signed in, for the routes an
+// application puts behind a session.
+//
+// 401 rather than 403: the credential is missing, not insufficient, and a
+// client seeing 401 knows to send the user to sign in rather than to report
+// that they are not allowed.
+func (c *Auth) RequireAuth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !ryauth.CheckRequest(r) {
+			c.Error(w, r, http.StatusUnauthorized, "Not signed in.")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (c *Auth) serverError(w http.ResponseWriter, r *http.Request, what string, err error) {
+	c.App.Log.Error("could not "+what, "error", err, "path", r.URL.Path)
+	c.Error(w, r, http.StatusInternalServerError, "Something went wrong.")
+}

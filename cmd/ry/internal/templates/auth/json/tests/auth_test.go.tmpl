@@ -1,0 +1,269 @@
+// Feature tests for the authentication endpoints `ry make:auth` generated.
+//
+// They drive the real router: sessions, CSRF, rate limiting and the database
+// are all in play, so what passes here is what a browser gets.
+package tests
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	ryauth "{{.RylaModule}}/auth"
+	rytest "{{.RylaModule}}/testing"
+)
+
+// post sends a JSON body from an address of its own.
+//
+// The address matters: these routes are rate-limited per client IP, and every
+// test in this file sharing one would make the order they run in decide whether
+// they pass.
+func post(t *testing.T, c *rytest.Client, ip, path string, body any) *rytest.Response {
+	t.Helper()
+
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("encode the request body: %v", err)
+	}
+
+	req := c.Request(http.MethodPost, path, bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = ip + ":54321"
+
+	return c.Do(req)
+}
+
+// TestRegisterSaysTheSameThingForATakenAddress is the property the whole
+// registration flow is arranged around. If signing up with an address that
+// already has an account answered differently from one that does not, anyone
+// could walk a list of addresses through this endpoint and learn who has an
+// account here. The difference goes into the email instead.
+func TestRegisterSaysTheSameThingForATakenAddress(t *testing.T) {
+	c := client(t)
+
+	body := map[string]string{
+		"name":                  "Ada",
+		"email":                 "ada@example.com",
+		"password":              "correct-horse-battery",
+		"password_confirmation": "correct-horse-battery",
+	}
+
+	first := post(t, c, "203.0.113.10", "/api/auth/register", body)
+	first.AssertStatus(http.StatusAccepted)
+
+	second := post(t, c, "203.0.113.11", "/api/auth/register", body)
+	second.AssertStatus(http.StatusAccepted)
+
+	if first.Body() != second.Body() {
+		t.Errorf("a taken address answered differently:\n new:   %s\n taken: %s",
+			first.Body(), second.Body())
+	}
+}
+
+// TestSignInRefusesWithoutSayingWhichHalfWasWrong covers the other half of that
+// promise. A wrong password and an address with no account have to be one
+// answer, or the sign-in form becomes the account-discovery tool registration
+// refuses to be.
+func TestSignInRefusesWithoutSayingWhichHalfWasWrong(t *testing.T) {
+	c := client(t)
+
+	post(t, c, "203.0.113.20", "/api/auth/register", map[string]string{
+		"name":                  "Grace",
+		"email":                 "grace@example.com",
+		"password":              "correct-horse-battery",
+		"password_confirmation": "correct-horse-battery",
+	}).AssertStatus(http.StatusAccepted)
+
+	wrongPassword := post(t, c, "203.0.113.21", "/api/auth/login", map[string]string{
+		"email":    "grace@example.com",
+		"password": "not-the-password",
+	})
+	wrongPassword.AssertStatus(http.StatusUnprocessableEntity)
+
+	noSuchAccount := post(t, c, "203.0.113.22", "/api/auth/login", map[string]string{
+		"email":    "nobody@example.com",
+		"password": "not-the-password",
+	})
+	noSuchAccount.AssertStatus(http.StatusUnprocessableEntity)
+
+	// Compared field by field rather than byte for byte: every failure carries
+	// its own request id, which is the one part that is supposed to differ.
+	if known, unknown := failure(t, wrongPassword), failure(t, noSuchAccount); known != unknown {
+		t.Errorf("a registered address answered differently from an unknown one:\n known:   %s\n unknown: %s",
+			known, unknown)
+	}
+}
+
+// failure reduces an error response to the part a client can see and act on.
+//
+// The request id is deliberately left out. It is different on every response by
+// design, and including it here would make this comparison fail for a reason
+// that has nothing to do with what the two answers reveal.
+func failure(t *testing.T, res *rytest.Response) string {
+	t.Helper()
+
+	var body struct {
+		Error struct {
+			Message string              `json:"message"`
+			Status  int                 `json:"status"`
+			Fields  map[string][]string `json:"fields"`
+		} `json:"error"`
+	}
+	res.AssertJSON(&body)
+
+	fields, err := json.Marshal(body.Error.Fields)
+	if err != nil {
+		t.Fatalf("re-encode the reported fields: %v", err)
+	}
+	return fmt.Sprintf("%d %s %s", body.Error.Status, body.Error.Message, fields)
+}
+
+// TestTheWholeSignInFlow follows one account from registration to a session and
+// back out again, which is the path every other test here assumes works.
+func TestTheWholeSignInFlow(t *testing.T) {
+	a := application(t)
+	c := client(t)
+
+	const email = "alan@example.com"
+	const password = "correct-horse-battery"
+
+	post(t, c, "203.0.113.30", "/api/auth/register", map[string]string{
+		"name":                  "Alan",
+		"email":                 email,
+		"password":              password,
+		"password_confirmation": password,
+	}).AssertStatus(http.StatusAccepted)
+
+	// Nobody yet: registering deliberately does not sign you in, because that
+	// would make a new address observably different from a taken one.
+	c.Get("/api/auth/me").AssertStatus(http.StatusUnauthorized)
+
+	var signedIn struct {
+		User struct {
+			ID       string `json:"id"`
+			Email    string `json:"email"`
+			Verified bool   `json:"verified"`
+		} `json:"user"`
+		Intended string `json:"intended"`
+	}
+	post(t, c, "203.0.113.31", "/api/auth/login", map[string]string{
+		"email":    email,
+		"password": password,
+	}).AssertOK().AssertJSON(&signedIn)
+
+	if signedIn.User.Email != email {
+		t.Errorf("signed in as %q, want %q", signedIn.User.Email, email)
+	}
+	// An unconfirmed address can still sign in. Refusing here would tell an
+	// attacker which addresses exist but have not been confirmed, and the
+	// application decides for itself which routes require a verified account.
+	if signedIn.User.Verified {
+		t.Error("the address is verified before the link was followed")
+	}
+
+	c.Get("/api/auth/me").AssertOK()
+
+	post(t, c, "203.0.113.32", "/api/auth/logout", nil).AssertStatus(http.StatusNoContent)
+	c.Get("/api/auth/me").AssertStatus(http.StatusUnauthorized)
+
+	// The link that was emailed, minted with the application's own signer:
+	// reading it out of a mailbox is the one step of this flow a test cannot
+	// follow, and the id came from the sign-in above rather than from the
+	// database, so this reads the same whichever store is underneath.
+	token := a.Signer.Sign(ryauth.PurposeVerifyEmail, signedIn.User.ID, time.Hour)
+
+	var confirmed struct {
+		User struct {
+			Verified bool `json:"verified"`
+		} `json:"user"`
+	}
+	c.Get("/api/auth/verify?token=" + token).AssertOK().AssertJSON(&confirmed)
+
+	if !confirmed.User.Verified {
+		t.Error("following the confirmation link left the address unverified")
+	}
+
+	// Confirming the link proves control of the address, so it signs you in.
+	c.Get("/api/auth/me").AssertOK()
+}
+
+// TestAnInvalidConfirmationLinkIsRefused covers the three ways a link goes bad —
+// expired, forged, or naming an account that is gone — which answer alike so
+// that nobody with a token generator can learn which user ids exist.
+func TestAnInvalidConfirmationLinkIsRefused(t *testing.T) {
+	a := application(t)
+	c := client(t)
+
+	// A token signed for another purpose. Password reset links and confirmation
+	// links are both signed by this application, and only the purpose stops one
+	// being handed to the other's endpoint.
+	wrongPurpose := a.Signer.Sign(ryauth.PurposeResetPassword, "1", time.Hour)
+
+	for name, token := range map[string]string{
+		"nonsense":      "not-a-token",
+		"empty":         "",
+		"wrong purpose": wrongPurpose,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c.Get("/api/auth/verify?token=" + token).
+				AssertStatus(http.StatusUnprocessableEntity)
+		})
+	}
+}
+
+// TestAPasswordIsNeverInAResponse is worth its own test because the model is
+// serialised in several places and a `json:"-"` is one keystroke from being a
+// `json:"password"`.
+func TestAPasswordIsNeverInAResponse(t *testing.T) {
+	c := client(t)
+
+	post(t, c, "203.0.113.40", "/api/auth/register", map[string]string{
+		"name":                  "Edsger",
+		"email":                 "edsger@example.com",
+		"password":              "correct-horse-battery",
+		"password_confirmation": "correct-horse-battery",
+	}).AssertStatus(http.StatusAccepted)
+
+	res := post(t, c, "203.0.113.41", "/api/auth/login", map[string]string{
+		"email":    "edsger@example.com",
+		"password": "correct-horse-battery",
+	})
+	res.AssertOK()
+
+	for _, leak := range []string{"correct-horse-battery", "$argon2", "password"} {
+		if strings.Contains(res.Body(), leak) {
+			t.Errorf("the sign-in response contains %q:\n%s", leak, res.Body())
+		}
+	}
+}
+
+// TestValidationFailuresArriveKeyedByField checks the shape a form depends on:
+// a 422 whose error.fields names the input to put each message under.
+func TestValidationFailuresArriveKeyedByField(t *testing.T) {
+	c := client(t)
+
+	res := post(t, c, "203.0.113.50", "/api/auth/register", map[string]string{
+		"name":                  "",
+		"email":                 "not-an-email",
+		"password":              "short",
+		"password_confirmation": "different",
+	})
+	res.AssertStatus(http.StatusUnprocessableEntity)
+
+	var body struct {
+		Error struct {
+			Fields map[string][]string `json:"fields"`
+		} `json:"error"`
+	}
+	res.AssertJSON(&body)
+
+	for _, field := range []string{"name", "email", "password"} {
+		if len(body.Error.Fields[field]) == 0 {
+			t.Errorf("nothing was reported for %q; got %v", field, body.Error.Fields)
+		}
+	}
+}

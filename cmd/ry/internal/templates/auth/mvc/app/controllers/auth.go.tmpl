@@ -1,0 +1,237 @@
+package controllers
+
+import (
+	"errors"
+	"net/http"
+	"strconv"
+
+	"{{.RylaModule}}/flash"
+	"{{.RylaModule}}/validate"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/requests"
+	"{{.Module}}/resources/views/auth"
+)
+
+// Auth renders the authentication pages.
+//
+// It decides nothing. Every rule worth getting right — what is revealed when an
+// address is unknown, when a hash is upgraded, how long a reset link lives — is
+// in authCore, which the JSON API uses too, so the two cannot answer
+// differently. What is left here is the part that is genuinely about serving
+// pages: which template, which status, which flash message, where to redirect.
+type Auth struct {
+	Base
+	authCore
+}
+
+// NewAuth builds the controller.
+func NewAuth(a *app.App) *Auth {
+	return &Auth{Base: Base{App: a}, authCore: newAuthCore(a)}
+}
+
+// ShowRegister handles GET /register.
+func (c *Auth) ShowRegister(w http.ResponseWriter, r *http.Request) {
+	c.Render(w, r, auth.Register(auth.RegisterForm{}))
+}
+
+// Register handles POST /register.
+func (c *Auth) Register(w http.ResponseWriter, r *http.Request) {
+	var form requests.Register
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		http.Error(w, "Could not read the submitted form.", http.StatusBadRequest)
+		return
+	}
+	form.Email = normalizeEmail(form.Email)
+
+	if bag.Any() {
+		c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.Register(auth.RegisterForm{
+			Name: form.Name, Email: form.Email, Errors: bag,
+		}))
+		return
+	}
+
+	if err := c.authCore.Register(r, form); err != nil {
+		c.serverError(w, r, "register the account", err)
+		return
+	}
+
+	c.App.Flash.Add(w, r, flash.Info,
+		"Check your inbox — we have sent a link to "+form.Email+".")
+	c.Redirect(w, r, "/login")
+}
+
+// Verify handles GET /verify.
+func (c *Auth) Verify(w http.ResponseWriter, r *http.Request) {
+	user, err := c.authCore.Verify(w, r, r.URL.Query().Get("token"))
+	switch {
+	case errors.Is(err, errInvalidLink):
+		c.App.Flash.Add(w, r, flash.Error,
+			"That confirmation link is invalid or has expired. Sign up again to get a new one.")
+		c.Redirect(w, r, "/register")
+		return
+	case err != nil:
+		c.serverError(w, r, "confirm the address", err)
+		return
+	}
+
+	c.App.Flash.Add(w, r, flash.Success, "Welcome, "+user.Name+".")
+	c.Redirect(w, r, "/")
+}
+
+// ShowLogin handles GET /login.
+func (c *Auth) ShowLogin(w http.ResponseWriter, r *http.Request) {
+	// Pulled here so the "check your inbox" message set by Register survives
+	// its redirect and is shown exactly once.
+	c.Render(w, r, auth.Login(auth.LoginForm{Messages: c.App.Flash.Pull(w, r)}))
+}
+
+// Login handles POST /login.
+func (c *Auth) Login(w http.ResponseWriter, r *http.Request) {
+	var form requests.Login
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		http.Error(w, "Could not read the submitted form.", http.StatusBadRequest)
+		return
+	}
+	if bag.Any() {
+		c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.Login(auth.LoginForm{
+			Email: form.Email, Errors: bag,
+		}))
+		return
+	}
+	form.Email = normalizeEmail(form.Email)
+
+	_, err = c.authCore.Login(w, r, form)
+
+	var throttled errThrottled
+	switch {
+	case errors.As(err, &throttled):
+		w.Header().Set("Retry-After", strconv.Itoa(int(throttled.RetryAfter.Seconds())+1))
+		c.RenderStatus(w, r, http.StatusTooManyRequests, auth.Login(auth.LoginForm{
+			Email: form.Email,
+			Errors: credentialErrors(
+				"Too many sign-in attempts. Try again in a few minutes."),
+		}))
+		return
+
+	case errors.Is(err, errBadCredentials):
+		c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.Login(auth.LoginForm{
+			Email:  form.Email,
+			Errors: credentialErrors("Those credentials do not match our records."),
+		}))
+		return
+
+	case err != nil:
+		c.serverError(w, r, "sign in", err)
+		return
+	}
+
+	c.App.Flash.Add(w, r, flash.Success, "Signed in.")
+
+	// Back to whatever they were trying to reach before being sent here.
+	c.Redirect(w, r, c.Intended(r, "/"))
+}
+
+// Logout handles POST /logout.
+func (c *Auth) Logout(w http.ResponseWriter, r *http.Request) {
+	c.authCore.Logout(w, r)
+
+	c.App.Flash.Add(w, r, flash.Info, "Signed out.")
+	c.Redirect(w, r, "/")
+}
+
+// ShowForgotPassword handles GET /forgot-password.
+func (c *Auth) ShowForgotPassword(w http.ResponseWriter, r *http.Request) {
+	// Pulled here so the "that link has expired" message set by the reset
+	// handlers survives its redirect and is shown exactly once.
+	c.Render(w, r, auth.ForgotPassword(auth.ForgotPasswordForm{Messages: c.App.Flash.Pull(w, r)}))
+}
+
+// ForgotPassword handles POST /forgot-password.
+func (c *Auth) ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var form requests.ForgotPassword
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		http.Error(w, "Could not read the submitted form.", http.StatusBadRequest)
+		return
+	}
+	form.Email = normalizeEmail(form.Email)
+
+	if bag.Any() {
+		c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.ForgotPassword(auth.ForgotPasswordForm{
+			Email: form.Email, Errors: bag,
+		}))
+		return
+	}
+
+	if err := c.authCore.ForgotPassword(r, form); err != nil {
+		c.serverError(w, r, "look up the account", err)
+		return
+	}
+
+	c.App.Flash.Add(w, r, flash.Info,
+		"Check your inbox — we have sent a link to "+form.Email+".")
+	c.Redirect(w, r, "/login")
+}
+
+// ShowResetPassword handles GET /reset-password.
+//
+// The token is checked before the form is drawn, so a stale link says so
+// straight away rather than after somebody has chosen and typed a new password
+// twice.
+func (c *Auth) ShowResetPassword(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if err := c.CheckResetToken(token); err != nil {
+		c.expiredResetLink(w, r)
+		return
+	}
+
+	c.Render(w, r, auth.ResetPassword(auth.ResetPasswordForm{Token: token}))
+}
+
+// ResetPassword handles POST /reset-password.
+func (c *Auth) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	var form requests.ResetPassword
+
+	bag, err := validate.BindAndCheck(r, &form)
+	if err != nil {
+		http.Error(w, "Could not read the submitted form.", http.StatusBadRequest)
+		return
+	}
+	if bag.Any() {
+		c.RenderStatus(w, r, http.StatusUnprocessableEntity, auth.ResetPassword(auth.ResetPasswordForm{
+			Token: form.Token, Errors: bag,
+		}))
+		return
+	}
+
+	_, err = c.authCore.ResetPassword(r, form)
+	switch {
+	case errors.Is(err, errInvalidLink):
+		c.expiredResetLink(w, r)
+		return
+	case err != nil:
+		c.serverError(w, r, "store the new password", err)
+		return
+	}
+
+	c.App.Flash.Add(w, r, flash.Success, "Your password has been changed. Sign in with it.")
+	c.Redirect(w, r, "/login")
+}
+
+func (c *Auth) serverError(w http.ResponseWriter, r *http.Request, what string, err error) {
+	c.App.Log.Error("could not "+what, "error", err, "path", r.URL.Path)
+	http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+}
+
+// expiredResetLink sends the visitor back to ask for a fresh link.
+func (c *Auth) expiredResetLink(w http.ResponseWriter, r *http.Request) {
+	c.App.Flash.Add(w, r, flash.Error,
+		"That reset link is invalid or has expired. Ask for a new one.")
+	c.Redirect(w, r, "/forgot-password")
+}

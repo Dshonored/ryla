@@ -1,0 +1,399 @@
+package controllers
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	ryauth "{{.RylaModule}}/auth"
+	"{{.RylaModule}}/mail"
+	"{{.RylaModule}}/ratelimit"
+	"{{.RylaModule}}/session"
+	"{{.RylaModule}}/validate"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/mails"
+	"{{.Module}}/app/models"
+	"{{.Module}}/app/requests"
+)
+
+// The failures a caller has to tell apart. Anything else is a server error and
+// is reported as one.
+var (
+	// errBadCredentials covers a wrong password and an address with no account
+	// alike. They are one error on purpose: separating them turns the sign-in
+	// form into a way of discovering which addresses are registered.
+	errBadCredentials = errors.New("those credentials do not match our records")
+
+	// errInvalidLink covers an emailed link that is expired, forged, or points
+	// at an account that no longer exists. One error for all three, because
+	// telling them apart would let anyone with a token generator learn which
+	// user ids exist.
+	errInvalidLink = errors.New("that link is invalid or has expired")
+)
+
+// errThrottled reports that sign-in attempts for an address have been refused
+// for now. It carries the wait so a caller can put it in a Retry-After header
+// or a sentence, whichever suits the client it answers.
+type errThrottled struct {
+	RetryAfter time.Duration
+}
+
+func (e errThrottled) Error() string {
+	return fmt.Sprintf("too many sign-in attempts; try again in %s", e.RetryAfter.Round(time.Second))
+}
+
+// resetWindow is how long an emailed reset link stays usable.
+//
+// Short, because the link is a bearer credential sitting in a mailbox: anyone
+// holding it can take the account over. Long enough that somebody who reads
+// their email on another device still gets there in time.
+//
+// Nothing is stored server-side to mark a token spent, so a link keeps working
+// for the rest of the hour even after it has been used. Keeping the window
+// tight is what limits that; storing issued tokens is the alternative, and it
+// costs a table.
+const resetWindow = time.Hour
+
+// authCore is the authentication flow with nothing about how it is presented.
+//
+// Every decision that has to be right lives here — what is said when an address
+// is already registered, when a hash is upgraded, what a failed sign-in
+// reveals — so that the server-rendered pages and the JSON API cannot answer
+// differently. A copy of this reasoning per web mode would be two copies to
+// keep in step, and the one that drifted would be the one nobody tested.
+type authCore struct {
+	app   *app.App
+	users userStore
+
+	// attempts throttles failed sign-ins per email address.
+	//
+	// The route-level limiter counts requests per IP; this counts failures per
+	// account, which is what stops one address being attacked from many
+	// machines. Only failures are counted, and a success clears the record, so
+	// this is invisible to anyone typing their own password.
+	attempts *ratelimit.Limiter
+}
+
+func newAuthCore(a *app.App) authCore {
+	return authCore{
+		app:      a,
+		users:    newUserStore(a.DB),
+		attempts: ratelimit.New(5, 15*time.Minute),
+	}
+}
+
+// Register stores an account and emails a confirmation link.
+//
+// It answers the same whether or not the address is already registered. Saying
+// "that email is already registered" would hand anyone a way to discover which
+// addresses have accounts — exactly what the sign-in form refuses to reveal,
+// given away by the form next to it.
+//
+// The person who owns the address still finds out what happened, because the
+// difference goes into the email rather than the response.
+func (c authCore) Register(r *http.Request, form requests.Register) error {
+	ctx := r.Context()
+
+	existing, err := c.users.FindByEmail(ctx, form.Email)
+	switch {
+	case err == nil:
+		// Already registered. Tell the owner of the address, not the browser.
+		c.sendAccountExists(ctx, existing)
+		return nil
+
+	case errors.Is(err, errNoUser):
+		return c.createUnverified(ctx, form)
+
+	default:
+		return err
+	}
+}
+
+// createUnverified stores the account and emails a confirmation link.
+//
+// The user is deliberately not signed in yet: doing so would make a successful
+// signup observably different from one that hit an existing address, which is
+// the leak this flow exists to close.
+func (c authCore) createUnverified(ctx context.Context, form requests.Register) error {
+	hash, err := ryauth.Hash(form.Password)
+	if err != nil {
+		return err
+	}
+
+	user := models.User{Name: form.Name, Email: form.Email, Password: hash}
+
+	if err := c.users.Create(ctx, &user); err != nil {
+		// Two simultaneous signups can both pass the check above; the unique
+		// index settles it. The loser is treated as an existing account, which
+		// is the truth by then.
+		if errors.Is(err, errUserExists) {
+			c.sendAccountExists(ctx, user)
+			return nil
+		}
+		return err
+	}
+
+	token := c.app.Signer.Sign(ryauth.PurposeVerifyEmail, user.SessionID(), 24*time.Hour)
+	link := c.app.Config.URL + "/verify?token=" + url.QueryEscape(token)
+
+	msg := mails.VerifyEmail(c.app.From(), mail.Address{Name: user.Name, Email: user.Email},
+		c.app.Config.Name, link)
+
+	if err := c.app.Mail.Send(ctx, msg); err != nil {
+		// The account exists; the email did not go out. Logging beats failing
+		// the signup — the address can be confirmed again later.
+		c.app.Log.Error("could not send the verification email", "error", err, "user", user.SessionID())
+	}
+	return nil
+}
+
+func (c authCore) sendAccountExists(ctx context.Context, user models.User) {
+	msg := mails.AccountExists(c.app.From(), mail.Address{Name: user.Name, Email: user.Email},
+		c.app.Config.Name, c.app.Config.URL+"/login")
+
+	if err := c.app.Mail.Send(ctx, msg); err != nil {
+		c.app.Log.Error("could not send the account-exists email", "error", err)
+	}
+}
+
+// Verify confirms an address from an emailed link and signs the account in.
+//
+// Confirming the link proves control of the address, so it is a fine moment to
+// start a session.
+func (c authCore) Verify(w http.ResponseWriter, r *http.Request, token string) (models.User, error) {
+	subject, err := c.app.Signer.Verify(ryauth.PurposeVerifyEmail, token)
+	if err != nil {
+		return models.User{}, errInvalidLink
+	}
+
+	user, err := c.users.FindByID(r.Context(), subject)
+	if errors.Is(err, errNoUser) {
+		return models.User{}, errInvalidLink
+	}
+	if err != nil {
+		return models.User{}, err
+	}
+
+	if !user.Verified() {
+		if err := c.users.MarkVerified(r.Context(), &user); err != nil {
+			return models.User{}, err
+		}
+	}
+
+	ryauth.Login(session.From(r.Context()), user.SessionID())
+	return user, nil
+}
+
+// Login checks a password and starts a session.
+//
+// It returns errBadCredentials for both a wrong password and an unknown
+// address, and errThrottled once an address has failed too often.
+func (c authCore) Login(w http.ResponseWriter, r *http.Request, form requests.Login) (models.User, error) {
+	ctx := r.Context()
+
+	if ok, retryAfter := c.attempts.Allow(form.Email); !ok {
+		c.app.Log.Warn("sign-in throttled", "email", form.Email, "retry_after", retryAfter)
+		return models.User{}, errThrottled{RetryAfter: retryAfter}
+	}
+
+	user, err := c.users.FindByEmail(ctx, form.Email)
+	switch {
+	case errors.Is(err, errNoUser):
+		// Hash anyway. Without this, a missing account answers noticeably
+		// faster than a wrong password, and that difference tells an attacker
+		// which addresses are registered.
+		ryauth.DummyVerify(form.Password)
+		c.app.Log.Info("failed sign-in attempt", "email", form.Email)
+		return models.User{}, errBadCredentials
+	case err != nil:
+		return models.User{}, err
+	}
+
+	ok, err := ryauth.Verify(user.Password, form.Password)
+	if err != nil {
+		return models.User{}, err
+	}
+	if !ok {
+		c.app.Log.Info("failed sign-in attempt", "email", form.Email)
+		return models.User{}, errBadCredentials
+	}
+
+	// The one moment the plaintext password is in hand, so the only moment an
+	// outdated hash can be upgraded without asking the user to do anything.
+	if ryauth.NeedsRehash(user.Password) {
+		if hash, hashErr := ryauth.Hash(form.Password); hashErr == nil {
+			c.users.UpgradeHash(ctx, &user, hash)
+		}
+	}
+
+	// A correct password clears the record, so someone who mistyped twice and
+	// then got it right is not left near the limit.
+	c.attempts.Reset(form.Email)
+
+	ryauth.Login(session.From(r.Context()), user.SessionID())
+	return user, nil
+}
+
+// Logout ends the session, server-side record included.
+func (c authCore) Logout(w http.ResponseWriter, r *http.Request) {
+	s := session.From(r.Context())
+
+	// Remove the server-side row as well as clearing the session, so the old
+	// id cannot be replayed by anything still holding the cookie.
+	if store, ok := c.app.Session.(*session.DBStore); ok {
+		_ = store.Destroy(w, r, s)
+	}
+	ryauth.Logout(s)
+}
+
+// Intended is where to send someone once they have signed in: whatever they
+// were reaching for when they were sent to the login form, or fallback.
+func (c authCore) Intended(r *http.Request, fallback string) string {
+	return ryauth.Intended(session.From(r.Context()), fallback)
+}
+
+// ForgotPassword emails a reset link.
+//
+// Like Register, it answers the same whether or not the address has an account.
+// Answering "no account with that address" would turn this form into the
+// account-discovery tool the sign-in form deliberately refuses to be — and it
+// sits one page away from that form, so the leak would be just as useful.
+//
+// Both branches send an email, so the sentence shown afterwards is true either
+// way; the difference goes into the message rather than the response.
+func (c authCore) ForgotPassword(r *http.Request, form requests.ForgotPassword) error {
+	ctx := r.Context()
+
+	user, err := c.users.FindByEmail(ctx, form.Email)
+	switch {
+	case err == nil:
+		c.sendResetLink(ctx, user)
+		return nil
+
+	case errors.Is(err, errNoUser):
+		c.sendResetNoAccount(ctx, form.Email)
+		return nil
+
+	default:
+		return err
+	}
+}
+
+// sendResetLink emails the signed link for a real account.
+func (c authCore) sendResetLink(ctx context.Context, user models.User) {
+	// PurposeResetPassword, so this token cannot be handed to /verify to
+	// confirm an address, and a confirmation link cannot be handed here to
+	// change a password.
+	token := c.app.Signer.Sign(ryauth.PurposeResetPassword, user.SessionID(), resetWindow)
+	link := c.app.Config.URL + "/reset-password?token=" + url.QueryEscape(token)
+
+	msg := mails.ResetPassword(c.app.From(), mail.Address{Name: user.Name, Email: user.Email},
+		c.app.Config.Name, link)
+
+	if err := c.app.Mail.Send(ctx, msg); err != nil {
+		// Logged rather than surfaced: telling the client the send failed would
+		// answer differently for an address that has an account, which is the
+		// whole point of this handler answering identically.
+		c.app.Log.Error("could not send the password reset email", "error", err, "user", user.SessionID())
+	}
+}
+
+// sendResetNoAccount tells the owner of an unregistered address what happened.
+func (c authCore) sendResetNoAccount(ctx context.Context, email string) {
+	msg := mails.PasswordResetNoAccount(c.app.From(), mail.Address{Email: email},
+		c.app.Config.Name, c.app.Config.URL+"/register")
+
+	if err := c.app.Mail.Send(ctx, msg); err != nil {
+		c.app.Log.Error("could not send the no-account password reset email", "error", err)
+	}
+}
+
+// CheckResetToken reports whether a link is still good, without spending it.
+// It is what lets a stale link say so before somebody chooses and types a new
+// password twice.
+func (c authCore) CheckResetToken(token string) error {
+	if _, err := c.app.Signer.Verify(ryauth.PurposeResetPassword, token); err != nil {
+		return errInvalidLink
+	}
+	return nil
+}
+
+// ResetPassword sets a new password from an emailed link.
+func (c authCore) ResetPassword(r *http.Request, form requests.ResetPassword) (models.User, error) {
+	ctx := r.Context()
+
+	// Re-checked on submit, never trusted from the hidden field alone: the
+	// signature is what proves the person at this form was sent the email, and
+	// the expiry has to be judged now rather than when the page was drawn.
+	subject, err := c.app.Signer.Verify(ryauth.PurposeResetPassword, form.Token)
+	if err != nil {
+		return models.User{}, errInvalidLink
+	}
+
+	user, err := c.users.FindByID(ctx, subject)
+	if errors.Is(err, errNoUser) {
+		return models.User{}, errInvalidLink
+	}
+	if err != nil {
+		return models.User{}, err
+	}
+
+	hash, err := ryauth.Hash(form.Password)
+	if err != nil {
+		return models.User{}, err
+	}
+
+	// Opening the emailed link proves control of the address, which is the same
+	// evidence /verify accepts. Leaving it unconfirmed afterwards would be a
+	// state nothing else can clear.
+	if err := c.users.SetPassword(ctx, &user, hash, !user.Verified()); err != nil {
+		return models.User{}, err
+	}
+
+	c.signOutEverywhere(user)
+	return user, nil
+}
+
+// signOutEverywhere ends every session belonging to the user.
+//
+// A reset is usually the answer to a compromise, so an attacker still holding a
+// live session would keep exactly the access the reset was meant to take away —
+// and could simply set the password again. Only a server-side store keeps the
+// records this needs; a cookie store has nothing to revoke, so say so in the log
+// rather than let an operator believe the sessions were ended.
+func (c authCore) signOutEverywhere(user models.User) {
+	store, ok := c.app.Session.(*session.DBStore)
+	if !ok {
+		c.app.Log.Warn("password reset could not end the user's other sessions: this session store keeps no server-side record to revoke",
+			"user", user.SessionID(), "store", fmt.Sprintf("%T", c.app.Session))
+		return
+	}
+
+	if err := store.DestroyForUser(user.SessionID()); err != nil {
+		// The password is already changed, so failing the request now would be
+		// misleading. The sessions that survive are the cost, and the log is
+		// what makes that visible.
+		c.app.Log.Error("could not end the user's other sessions after a password reset", "error", err, "user", user.SessionID())
+	}
+}
+
+// credentialErrors turns a failed sign-in into a message beside the email field.
+//
+// It hangs on "email" rather than "password" because the failure is deliberately
+// about the pair: naming the password would imply the address was recognised.
+func credentialErrors(message string) validate.ErrorBag {
+	bag := validate.ErrorBag{}
+	bag.Add("email", message)
+	return bag
+}
+
+// normalizeEmail lowercases and trims, so Alice@Example.com and
+// alice@example.com cannot become two accounts.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}

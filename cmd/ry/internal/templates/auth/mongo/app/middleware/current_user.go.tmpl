@@ -1,0 +1,55 @@
+package middleware
+
+import (
+	"context"
+	"net/http"
+
+	"{{.RylaModule}}/auth"
+	rymongo "{{.RylaModule}}/mongo"
+	"{{.RylaModule}}/session"
+
+	"{{.Module}}/app/models"
+)
+
+type ctxKey int
+
+const userKey ctxKey = 0
+
+// CurrentUser loads the signed-in user onto the request context.
+//
+// The framework only knows the user's id; the application owns the model. That
+// is why this lives here rather than in the framework: it can return a real
+// *models.User the compiler checks, instead of an any every caller has to
+// type-assert.
+func CurrentUser(db *rymongo.Database) func(http.Handler) http.Handler {
+	users := rymongo.For[models.User](db, models.UserCollection)
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// The session stores the id as text, which is what an ObjectID is
+			// outside the database anyway.
+			id, err := models.ParseUserID(auth.ID(session.From(r.Context())))
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			user, err := users.FindByID(r.Context(), id)
+			if err != nil {
+				// The session names a user who no longer exists — a deleted
+				// account, or a database restored from an older backup. Treat
+				// that as signed out rather than failing the request.
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey, user)))
+		})
+	}
+}
+
+// User returns the signed-in user, or nil.
+func User(ctx context.Context) *models.User {
+	u, _ := ctx.Value(userKey).(*models.User)
+	return u
+}

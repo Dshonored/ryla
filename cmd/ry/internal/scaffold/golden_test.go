@@ -214,6 +214,19 @@ func goLangVersion(t *testing.T) string {
 // intricate thing the generators produce: two view packages, a controller
 // importing both the framework's auth package and a views package of the same
 // name, and a model the framework never sees.
+// TestAuthScaffoldCompiles builds `ry make:auth` into every project shape that
+// can carry it.
+//
+// The scaffold varies on two axes at once — how the flow is presented, and how
+// a user is stored — and the combinations are not interchangeable: a JSON
+// controller against a document store shares no line of database code with a
+// server-rendered one against GORM. Templates are text, so a combination nobody
+// renders is a combination nobody knows is broken.
+//
+// Postgres and MySQL are left out deliberately. Auth reaches the database
+// through one GORM file that SQLite exercises identically, and the dialects
+// themselves are already covered by the project matrix above; running them here
+// would triple the time for no new code path.
 func TestAuthScaffoldCompiles(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping: scaffolds a project and resolves modules over the network")
@@ -222,11 +235,31 @@ func TestAuthScaffoldCompiles(t *testing.T) {
 		t.Skip("skipping: the Go toolchain is not on PATH")
 	}
 
+	for _, database := range []string{"sqlite", "mongo"} {
+		for _, web := range []string{"mvc", "api", "react", "svelte"} {
+			t.Run(database+"_"+web, func(t *testing.T) {
+				t.Parallel()
+				buildAuthProject(t, database, web)
+			})
+		}
+	}
+}
+
+// buildAuthProject scaffolds one project, applies make:auth to it, and checks
+// the result compiles, vets, tests and is gofmt-clean.
+func buildAuthProject(t *testing.T, database, web string) {
+	t.Helper()
+
 	ctx := context.Background()
 	root := repoRoot(t)
 	dir := filepath.Join(t.TempDir(), "demo")
 
-	proj, err := scaffold.NewProject("demo", "demo", "sqlite", "mvc", "", "", "dev", goLangVersion(t))
+	lang, css := "", ""
+	if web == "react" || web == "svelte" {
+		lang, css = "ts", "plain"
+	}
+
+	proj, err := scaffold.NewProject("demo", "demo", database, web, lang, css, "dev", goLangVersion(t))
 	if err != nil {
 		t.Fatalf("build project: %v", err)
 	}
@@ -243,9 +276,14 @@ func TestAuthScaffoldCompiles(t *testing.T) {
 		t.Fatalf("generate project: %v", err)
 	}
 
+	overlays, err := scaffold.AuthOverlays(web, database)
+	if err != nil {
+		t.Fatalf("choose auth overlays: %v", err)
+	}
+
 	auth := &scaffold.Generator{
 		FS:       templates.FS,
-		Overlays: []string{"auth"},
+		Overlays: overlays,
 		Dest:     dir,
 		Data:     scaffold.NewStub("demo", "User"),
 	}
@@ -253,25 +291,59 @@ func TestAuthScaffoldCompiles(t *testing.T) {
 		t.Fatalf("generate auth: %v", err)
 	}
 
-	// The users migration is generated separately, since it carries a timestamp.
-	stub := scaffold.NewStub("demo", "User").WithMigration("create_users", fixedTime())
-	migration := filepath.Join(dir, "database", "migrations", stub.ID+".go")
-	if err := scaffold.RenderTo(templates.FS, "make/migration_users.go.tmpl", migration, stub, false); err != nil {
-		t.Fatalf("render migration: %v", err)
+	// The users migration is generated separately, since it carries a
+	// timestamp — and not at all for a document store, which has no schema to
+	// migrate: the model declares its own unique index on the address.
+	if database != "mongo" {
+		stub := scaffold.NewStub("demo", "User").WithMigration("create_users", fixedTime())
+		migration := filepath.Join(dir, "database", "migrations", stub.ID+".go")
+		if err := scaffold.RenderTo(templates.FS, "make/migration_users.go.tmpl", migration, stub, false); err != nil {
+			t.Fatalf("render migration: %v", err)
+		}
 	}
+
+	// The one line make:auth asks for by hand. Without it the routes are dead
+	// code, and dead code compiles — which would make this test pass while the
+	// scaffold it is checking was unreachable.
+	registerAuthRoutes(t, dir)
 
 	run(t, ctx, dir, "go", "mod", "edit",
 		"-replace="+scaffold.RylaModule+"="+root,
 		"-require="+scaffold.RylaModule+"@v0.0.0",
 	)
-	run(t, ctx, dir, "go", "get", "-tool", "github.com/a-h/templ/cmd/templ")
-	run(t, ctx, dir, "go", "tool", "templ", "generate")
+	if web == "mvc" {
+		run(t, ctx, dir, "go", "get", "-tool", "github.com/a-h/templ/cmd/templ")
+		run(t, ctx, dir, "go", "tool", "templ", "generate")
+	}
 	run(t, ctx, dir, "go", "mod", "tidy")
 	run(t, ctx, dir, "go", "build", "./...")
 	run(t, ctx, dir, "go", "vet", "./...")
 	run(t, ctx, dir, "go", "test", "./...")
 
 	assertGofmtClean(t, ctx, dir)
+}
+
+// registerAuthRoutes adds the RegisterAuth(a) call that make:auth prints rather
+// than writing, so the generated routes are actually reachable.
+func registerAuthRoutes(t *testing.T, dir string) {
+	t.Helper()
+
+	path := filepath.Join(dir, "routes", "web.go")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read routes: %v", err)
+	}
+
+	const anchor = "func Register(a *app.App) {"
+	body := string(raw)
+	if !strings.Contains(body, anchor) {
+		t.Fatalf("routes/web.go has no %q to hook into", anchor)
+	}
+
+	body = strings.Replace(body, anchor, anchor+"\n\tRegisterAuth(a)\n", 1)
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write routes: %v", err)
+	}
 }
 
 func fixedTime() time.Time {

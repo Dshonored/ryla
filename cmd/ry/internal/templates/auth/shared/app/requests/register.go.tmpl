@@ -1,0 +1,26 @@
+package requests
+
+// Register is the sign-up form.
+type Register struct {
+	Name     string `form:"name" json:"name" validate:"required,min=2,max=80"`
+	Email    string `form:"email" json:"email" validate:"required,email,max=255"`
+	Password string `form:"password" json:"password" validate:"required,min=8,max=200"`
+	// eqfield compares against another field on this struct, so a mistyped
+	// confirmation is caught before anything touches the database.
+	//
+	// The json tag is not decoration: a JSON body binds by tag, and without it
+	// password_confirmation would arrive as nothing and fail as "required" for
+	// every API client.
+	Confirm string `form:"password_confirmation" json:"password_confirmation" validate:"required,eqfield=Password"`
+}
+
+// Login is the sign-in form.
+//
+// The password has no length rule on purpose: telling someone their password is
+// "too short" at the login screen reveals the rule to anyone guessing, and the
+// value either matches the stored hash or it does not.
+type Login struct {
+	Email    string `form:"email" json:"email" validate:"required,email"`
+	Password string `form:"password" json:"password" validate:"required"`
+	Remember bool   `form:"remember" json:"remember"`
+}

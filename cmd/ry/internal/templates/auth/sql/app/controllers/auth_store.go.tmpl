@@ -1,0 +1,120 @@
+package controllers
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"gorm.io/gorm"
+
+	"{{.Module}}/app/models"
+)
+
+// The two outcomes a lookup has that are not failures. They are declared here
+// rather than returned as the driver's own errors so that the flow in
+// auth_core.go reads the same whichever database this project uses — and so
+// that swapping one for the other is this file, not every branch above it.
+var (
+	// errNoUser means nothing matched. The handlers answer identically whether
+	// or not an account exists, so this decides what to send, never what to say.
+	errNoUser = errors.New("no such user")
+	// errUserExists means the unique index rejected an insert. Two signups for
+	// one address can both pass a check; only the index settles it.
+	errUserExists = errors.New("user already exists")
+)
+
+// userStore is every database operation the authentication flow performs.
+//
+// The flow itself knows none of this. That is what lets one set of handlers
+// serve GORM and MongoDB alike: the queries differ completely, the decisions
+// built on them do not.
+type userStore struct {
+	db *gorm.DB
+}
+
+func newUserStore(db *gorm.DB) userStore { return userStore{db: db} }
+
+// FindByEmail looks an account up by address, returning errNoUser when there is
+// none.
+func (s userStore) FindByEmail(ctx context.Context, email string) (models.User, error) {
+	var user models.User
+
+	err := s.db.WithContext(ctx).Where("email = ?", email).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return models.User{}, errNoUser
+	}
+	return user, err
+}
+
+// FindByID looks an account up by the identifier carried in a signed link or a
+// session. It is a string because that is what both survive as, and because a
+// document id is not a number.
+func (s userStore) FindByID(ctx context.Context, id string) (models.User, error) {
+	key, err := models.ParseUserID(id)
+	if err != nil {
+		// A subject that is not an id at all cannot name a user, and reporting
+		// that differently from "no such user" would tell anyone with a token
+		// generator which ids are even well-formed.
+		return models.User{}, errNoUser
+	}
+
+	var user models.User
+	err = s.db.WithContext(ctx).First(&user, key).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return models.User{}, errNoUser
+	}
+	return user, err
+}
+
+// Create stores a new account, reporting errUserExists when the address is
+// taken.
+func (s userStore) Create(ctx context.Context, user *models.User) error {
+	err := s.db.WithContext(ctx).Create(user).Error
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return errUserExists
+	}
+	return err
+}
+
+// MarkVerified records that the address has been confirmed.
+func (s userStore) MarkVerified(ctx context.Context, user *models.User) error {
+	now := time.Now()
+	if err := s.db.WithContext(ctx).Model(user).Update("email_verified_at", now).Error; err != nil {
+		return err
+	}
+	user.EmailVerifiedAt = &now
+	return nil
+}
+
+// SetPassword stores a new hash, and confirms the address at the same time when
+// verify is set.
+//
+// One statement rather than two: a reset that changed the password and then
+// failed to record the confirmation would leave the account in a state nothing
+// else clears.
+func (s userStore) SetPassword(ctx context.Context, user *models.User, hash string, verify bool) error {
+	fields := map[string]any{"password": hash}
+
+	now := time.Now()
+	if verify {
+		fields["email_verified_at"] = now
+	}
+
+	if err := s.db.WithContext(ctx).Model(user).Updates(fields).Error; err != nil {
+		return err
+	}
+
+	user.Password = hash
+	if verify {
+		user.EmailVerifiedAt = &now
+	}
+	return nil
+}
+
+// UpgradeHash re-stores a password verified against outdated parameters.
+//
+// Failure is not worth surfacing: the sign-in it happened during succeeded, and
+// the same hash will be offered for upgrade again next time.
+func (s userStore) UpgradeHash(ctx context.Context, user *models.User, hash string) {
+	_ = s.db.WithContext(ctx).Model(user).Update("password", hash).Error
+}

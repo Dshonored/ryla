@@ -187,9 +187,24 @@ reset. `ry make:2fa` adds TOTP on top — an enrolment page with a QR code, a
 challenge that holds a signed-in session until it is answered, and single-use
 recovery codes.
 
-Both generate server-rendered pages against GORM, so both require the `mvc` web
-mode and a SQL database. They refuse rather than write files that would not
-compile.
+`make:auth` works in every web mode and against every database. On `mvc` it
+writes templ pages; on `api`, `react` and `svelte` it writes JSON endpoints
+under `/api/auth` and prints their contract. The storage half is chosen the same
+way: a GORM model and a migration, or a document with its own unique index.
+
+What it does not vary is the flow. Both presentations call one `authCore`, so
+the decisions that have to be right — what a failed sign-in reveals, when a
+password hash is upgraded, how long an emailed link lives — exist once and
+cannot drift apart. It does not generate frontend screens yet; the printed
+contract is what you build them against.
+
+The session is a cookie for JSON clients too. For a browser that is the safer
+choice: the cookie is `HttpOnly`, so a script that manages to run on your page
+cannot read the credential, which is not true of a token in local storage. The
+CSRF check therefore looks at the credential rather than the path, and the
+generated API client sends the token.
+
+`make:2fa` still requires `mvc` and SQL.
 
 Three decisions are worth knowing, because they are the parts that are easy to
 get subtly wrong:
@@ -278,9 +293,11 @@ server speaking the real protocol, so the actual client and Lua scripts run.
 **Built, and covered end to end.** Every one of the sixteen database × web-mode
 combinations is scaffolded into a temporary directory on each CI run and checked
 to build, vet, test and be gofmt-clean, on Linux, macOS and Windows. The
-`make:auth` and `make:2fa` scaffolds get the same treatment, on SQLite and
-`mvc`, which is the only combination they support. This is the test that matters
-most: templates are text, so nothing else in the build would catch a broken one.
+`make:auth` scaffold gets the same treatment across every web mode on both
+SQLite and MongoDB, and the feature tests it ships run as part of it — so the
+sign-in flow is exercised, not merely compiled. `make:2fa` is covered on SQLite
+and `mvc`, the only combination it supports. This is the test that matters most:
+templates are text, so nothing else in the build would catch a broken one.
 
 **Built, and integration-tested against a real server.** MongoDB — the driver,
 and the cache, session and queue stores built on it — runs against a `mongo:7`
@@ -299,10 +316,11 @@ but no generator wires it into a project yet. Using it today means writing the
 migration and the routes by hand. It is GORM-only, so MongoDB projects need
 their own token storage.
 
-**Not built.** OAuth and social sign-in. `make:auth` and `make:2fa` on MongoDB
-or on the `api`, `react` and `svelte` web modes — the generators refuse there
-rather than emit code that will not compile, so authentication in those projects
-is currently hand-written.
+**Not built.** OAuth and social sign-in. Frontend screens for `make:auth` on
+`react` and `svelte`: the endpoints and their contract are generated, the
+components are not, so the sign-in page itself is still yours to write.
+`make:2fa` on MongoDB or outside `mvc` — it refuses there rather than emit code
+that will not compile.
 
 ## Development
 

@@ -44,6 +44,36 @@ type Database struct {
 	DSNEnv string
 }
 
+// AuthOverlays picks the template sets `ry make:auth` renders for a project.
+//
+// The scaffold is split along the two axes it actually varies on. What the flow
+// decides is one set of files, shared by everything; how it is presented is
+// another; and how a user is stored is a third. A project that renders pages
+// and one that answers JSON get the same authCore, which is what stops the two
+// from drifting into answering differently about the things that matter — what
+// a failed sign-in reveals, when a hash is upgraded, how long a link lives.
+//
+// It lives here rather than beside the command because the golden test has to
+// render exactly what `ry make:auth` would, and a second copy of this mapping
+// is a second thing to keep in step.
+func AuthOverlays(web, database string) ([]string, error) {
+	overlays := []string{"auth/shared"}
+
+	switch web {
+	case "mvc":
+		overlays = append(overlays, "auth/mvc")
+	case "api", "react", "svelte":
+		overlays = append(overlays, "auth/json")
+	default:
+		return nil, fmt.Errorf("make:auth does not know the %q web mode", web)
+	}
+
+	if database == "mongo" {
+		return append(overlays, "auth/mongo"), nil
+	}
+	return append(overlays, "auth/sql"), nil
+}
+
 // WebMode describes one supported frontend style.
 type WebMode struct {
 	Name    string

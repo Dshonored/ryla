@@ -1,0 +1,88 @@
+package routes
+
+import (
+	"net/http"
+	"time"
+
+	"{{.RylaModule}}/ratelimit"
+	"{{.RylaModule}}/router"
+
+	"{{.Module}}/app"
+	"{{.Module}}/app/controllers"
+	appmw "{{.Module}}/app/middleware"
+)
+
+// RegisterAuth attaches the authentication endpoints.
+//
+// Call it from Register in web.go. It is a separate function in its own file so
+// that `ry make:auth` never had to rewrite your route table.
+//
+// Everything lives under /api, like the rest of what this server answers
+// itself, and the session is an ordinary cookie. Requests carrying that cookie
+// are CSRF-checked wherever they are addressed — see the middleware in app.go —
+// so the generated frontend client sends the token on every unsafe call.
+func RegisterAuth(a *app.App) {
+	auth := controllers.NewAuth(a)
+
+	// Loads the signed-in user onto the request context for every route.
+	a.Router.Use(appmw.CurrentUser(a.DB))
+
+	a.Router.Route("/api/auth", func(r *router.Router) {
+		// Answers for the cookie the client already holds, so it can find out
+		// on start-up whether it is signed in. Outside the guest group: it is
+		// the one endpoint here that a signed-in client is meant to call.
+		r.Get("/me", auth.Me).Name("api.auth.me")
+		r.Post("/logout", auth.Logout).Name("api.auth.logout")
+
+		// Guests only: a signed-in client has no business registering or
+		// signing in again, and letting it would quietly replace the session
+		// it already has.
+		r.Group(func(r *router.Router) {
+			r.Use(auth.RequireGuest)
+
+			// Following the emailed link proves control of the address, which
+			// is what signs the new account in.
+			r.Get("/verify", auth.Verify).Name("api.auth.verify")
+
+			// Checking a reset link is a read, and it reports only whether the
+			// link is still worth filling a form in for.
+			r.Get("/reset-password", auth.CheckResetToken).Name("api.auth.reset.check")
+
+			// Only the submissions are throttled.
+			//
+			// Ten a minute from one address: generous for a person mistyping a
+			// password, useless for guessing one or for walking a list of
+			// addresses through the sign-up endpoint to see which already
+			// exist.
+			//
+			// trustProxy stays false. Behind a proxy that overwrites
+			// X-Forwarded-For, set it to true; anywhere else, trusting the
+			// header lets a caller change it every request and never be
+			// limited at all.
+			r.Group(func(r *router.Router) {
+				r.Use(ratelimit.Middleware(ratelimit.Config{
+					Limiter: ratelimit.New(10, time.Minute),
+					KeyFunc: func(req *http.Request) string {
+						return ratelimit.ClientIP(req, false)
+					},
+				}))
+
+				r.Post("/register", auth.Register).Name("api.auth.register")
+				r.Post("/login", auth.Login).Name("api.auth.login")
+
+				// The forgot endpoint sends an email to any address handed to
+				// it, so unthrottled it is a way to have this application post
+				// mail at somebody else's inbox all day.
+				r.Post("/forgot-password", auth.ForgotPassword).Name("api.auth.password.email")
+				r.Post("/reset-password", auth.ResetPassword).Name("api.auth.password.update")
+			})
+		})
+	})
+
+	// Everything behind a sign-in goes here:
+	//
+	//	a.Router.Route("/api/account", func(r *router.Router) {
+	//	    r.Use(auth.RequireAuth)
+	//	    r.Get("/", account.Show).Name("api.account")
+	//	})
+}

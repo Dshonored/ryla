@@ -1,0 +1,125 @@
+// Feature tests for the authentication pages `ry make:auth` generated.
+//
+// They drive the real router: sessions, CSRF, rate limiting, the templates and
+// the database are all in play, so what passes here is what a browser gets.
+package tests
+
+import (
+	"net/http"
+	"net/url"
+	"strings"
+	"testing"
+
+	rytest "{{.RylaModule}}/testing"
+)
+
+// submit posts a form from an address of its own.
+//
+// The address matters: these routes are rate-limited per client IP, and every
+// test in this file sharing one would make the order they run in decide whether
+// they pass.
+func submit(t *testing.T, c *rytest.Client, ip, path string, form url.Values) *rytest.Response {
+	t.Helper()
+
+	req := c.Request(http.MethodPost, path, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.RemoteAddr = ip + ":54321"
+
+	return c.Do(req)
+}
+
+func registration(name, email, password string) url.Values {
+	return url.Values{
+		"name":                  {name},
+		"email":                 {email},
+		"password":              {password},
+		"password_confirmation": {password},
+	}
+}
+
+// TestRegisterSaysTheSameThingForATakenAddress is the property the whole
+// registration flow is arranged around. If signing up with an address that
+// already has an account behaved differently from one that does not, anyone
+// could walk a list of addresses through the form and learn who has an account
+// here. The difference goes into the email instead.
+func TestRegisterSaysTheSameThingForATakenAddress(t *testing.T) {
+	c := client(t)
+	form := registration("Ada", "ada@example.com", "correct-horse-battery")
+
+	submit(t, c, "203.0.113.10", "/register", form).AssertRedirect("/login")
+	submit(t, c, "203.0.113.11", "/register", form).AssertRedirect("/login")
+}
+
+// TestSignInRefusesWithoutSayingWhichHalfWasWrong covers the other half of that
+// promise. A wrong password and an address with no account have to produce one
+// message, or the sign-in form becomes the account-discovery tool registration
+// refuses to be.
+func TestSignInRefusesWithoutSayingWhichHalfWasWrong(t *testing.T) {
+	c := client(t)
+
+	submit(t, c, "203.0.113.20", "/register",
+		registration("Grace", "grace@example.com", "correct-horse-battery")).
+		AssertRedirect("/login")
+
+	const refusal = "do not match our records"
+
+	submit(t, c, "203.0.113.21", "/login", url.Values{
+		"email":    {"grace@example.com"},
+		"password": {"not-the-password"},
+	}).AssertStatus(http.StatusUnprocessableEntity).AssertContains(refusal)
+
+	submit(t, c, "203.0.113.22", "/login", url.Values{
+		"email":    {"nobody@example.com"},
+		"password": {"not-the-password"},
+	}).AssertStatus(http.StatusUnprocessableEntity).AssertContains(refusal)
+}
+
+// TestTheWholeSignInFlow follows one account from the form to a session and out
+// again, which is the path every other test here assumes works.
+func TestTheWholeSignInFlow(t *testing.T) {
+	c := client(t)
+
+	const email = "alan@example.com"
+	const password = "correct-horse-battery"
+
+	submit(t, c, "203.0.113.30", "/register", registration("Alan", email, password)).
+		AssertRedirect("/login")
+
+	// Registering deliberately does not sign you in: doing so would make a new
+	// address observably different from a taken one. The guest-only guard on
+	// the login page is what proves nobody is signed in yet.
+	c.Get("/login").AssertOK()
+
+	submit(t, c, "203.0.113.31", "/login", url.Values{
+		"email":    {email},
+		"password": {password},
+	}).AssertRedirect("/")
+
+	// Signed in now, so the guest-only pages redirect away.
+	c.Get("/login").AssertRedirect("/")
+
+	submit(t, c, "203.0.113.32", "/logout", nil).AssertRedirect("/")
+	c.Get("/login").AssertOK()
+}
+
+// TestAPasswordIsNeverRendered is worth its own test because the model reaches
+// the templates and a field added to a form is one line from being echoed back.
+func TestAPasswordIsNeverRendered(t *testing.T) {
+	c := client(t)
+
+	const password = "correct-horse-battery"
+
+	submit(t, c, "203.0.113.40", "/register", registration("Edsger", "edsger@example.com", password)).
+		AssertRedirect("/login")
+
+	// A refused sign-in re-renders the form with what was typed. The address
+	// comes back, deliberately, so it does not have to be typed again; the
+	// password must not.
+	res := submit(t, c, "203.0.113.41", "/login", url.Values{
+		"email":    {"edsger@example.com"},
+		"password": {"not-the-password"},
+	})
+	res.AssertStatus(http.StatusUnprocessableEntity)
+	res.AssertNotContains("not-the-password")
+	res.AssertContains("edsger@example.com")
+}
