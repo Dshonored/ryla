@@ -2,6 +2,11 @@
 #
 # Install the Ryla CLI.
 #
+#   curl -fsSL https://ryla.io/install.sh | sh
+#
+# The same file is served from the repository, for anyone who would rather not
+# trust a redirect:
+#
 #   curl -fsSL https://raw.githubusercontent.com/Dshonored/ryla/main/install.sh | sh
 #
 # Ryla is a Go framework, so a Go toolchain is not an installer detail you can
