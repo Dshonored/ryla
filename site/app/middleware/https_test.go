@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,7 +30,7 @@ func request(proto string) *http.Request {
 // hands whatever is between the visitor and here the choice of what runs.
 func TestPlaintextIsRedirectedRatherThanServed(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ForceHTTPS(true)(ok()).ServeHTTP(rec, request("http"))
+	ForceHTTPS()(ok()).ServeHTTP(rec, request("http"))
 
 	if rec.Code != http.StatusPermanentRedirect {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusPermanentRedirect)
@@ -42,23 +43,11 @@ func TestPlaintextIsRedirectedRatherThanServed(t *testing.T) {
 	}
 }
 
-// TestAMissingHeaderIsTreatedAsPlaintext covers the request that arrives with
-// nothing to say for itself. Assuming the best would mean any caller could skip
-// the redirect by leaving the header off.
-func TestAMissingHeaderIsTreatedAsPlaintext(t *testing.T) {
-	rec := httptest.NewRecorder()
-	ForceHTTPS(true)(ok()).ServeHTTP(rec, request(""))
-
-	if rec.Code != http.StatusPermanentRedirect {
-		t.Errorf("status = %d, want a redirect", rec.Code)
-	}
-}
-
 // TestASecureRequestIsServedAndToldToStaySecure checks the header that stops
 // the redirect from being needed a second time.
 func TestASecureRequestIsServedAndToldToStaySecure(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ForceHTTPS(true)(ok()).ServeHTTP(rec, request("https"))
+	ForceHTTPS()(ok()).ServeHTTP(rec, request("https"))
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200", rec.Code)
@@ -73,24 +62,54 @@ func TestASecureRequestIsServedAndToldToStaySecure(t *testing.T) {
 // after it.
 func TestAProxyListIsReadFromTheLeft(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ForceHTTPS(true)(ok()).ServeHTTP(rec, request("https, http"))
+	ForceHTTPS()(ok()).ServeHTTP(rec, request("https, http"))
 
 	if rec.Code != http.StatusOK {
-		t.Errorf("status = %d, want the request to be treated as secure", rec.Code)
+		t.Errorf("status = %d, want the request treated as secure", rec.Code)
 	}
 }
 
-// TestItStaysOutOfTheWayWhenDisabled is what keeps `ry dev` on localhost
-// working: there is no TLS there, and a redirect would send every request to an
-// address that answers nothing.
-func TestItStaysOutOfTheWayWhenDisabled(t *testing.T) {
+// TestAMissingHeaderIsLeftAlone is what keeps `ry dev` on a laptop working, and
+// what stops a redirect loop if whatever ends up in front of this never sets
+// the header: nothing said the request was plaintext, so there is no https
+// address to send it to.
+func TestAMissingHeaderIsLeftAlone(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ForceHTTPS(false)(ok()).ServeHTTP(rec, request("http"))
+	ForceHTTPS()(ok()).ServeHTTP(rec, request(""))
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want the request served", rec.Code)
 	}
 	if rec.Header().Get("Strict-Transport-Security") != "" {
-		t.Error("a plaintext development server promised HSTS")
+		t.Error("a request with no proxy in front of it was promised HSTS")
+	}
+}
+
+// TestAnEmptyHeaderCountsAsAbsent covers a proxy that sets the header to
+// nothing, which is a proxy that has told us nothing.
+func TestAnEmptyHeaderCountsAsAbsent(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	req := request("")
+	req.Header.Set("X-Forwarded-Proto", "")
+	ForceHTTPS()(ok()).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want the request served", rec.Code)
+	}
+}
+
+// TestDirectTLSIsNotRedirected covers the day this stops sitting behind a proxy
+// that terminates TLS for it. The connection is already secure, and bouncing it
+// to the address it is already at is a loop.
+func TestDirectTLSIsNotRedirected(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	req := request("http")
+	req.TLS = &tls.ConnectionState{}
+	ForceHTTPS()(ok()).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want the request served", rec.Code)
 	}
 }

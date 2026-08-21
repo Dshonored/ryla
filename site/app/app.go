@@ -150,7 +150,7 @@ func New() (*App, error) {
 	// Before the session and the CSRF token are touched: a request that is
 	// about to be redirected has no business being given a cookie, and the
 	// redirect is cheaper than the work it skips.
-	r.Use(appmw.ForceHTTPS(strings.HasPrefix(cfg.URL, "https://")))
+	r.Use(appmw.ForceHTTPS())
 	r.Use(session.Middleware(sessions, logger))
 	r.Use(csrf.Protect(csrf.Config{
 		Jar: jar,

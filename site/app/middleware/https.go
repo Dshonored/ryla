@@ -15,19 +15,28 @@ import (
 // harmless rather than dangerous.
 //
 // The scheme this process sees is always http, because TLS is terminated by the
-// proxy in front of it. X-Forwarded-Proto is what that proxy sets to say what
-// the browser actually used, and trusting it is only safe because nothing
-// reaches this handler except through that proxy — which is why the whole thing
-// is switched off unless the site is configured to be served over https at all.
-func ForceHTTPS(enabled bool) func(http.Handler) http.Handler {
+// proxy in front of it, so X-Forwarded-Proto is the only thing that knows what
+// the browser actually used. Its presence is also what decides whether any of
+// this applies: a request that arrives without it did not come through that
+// proxy — `ry dev` on a laptop, a probe against the container — and redirecting
+// it would send it somewhere that answers nothing.
+//
+// That header, and not a setting. The first version of this keyed off APP_URL,
+// which the container does not set, so the whole thing was switched off in the
+// one place it was written for and nothing said so. A rule that configures
+// itself from the request cannot be quietly disabled by a missing variable.
+func ForceHTTPS() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !enabled {
+			proto, ok := forwardedProto(r)
+			if !ok {
+				// Nothing in front of us, so there is no https address to
+				// promise and nothing to redirect to.
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			if !secure(r) {
+			if !strings.EqualFold(proto, "https") && r.TLS == nil {
 				// 308 rather than 301: it keeps the method and body, so a POST
 				// is not quietly turned into a GET on the way through. Nothing
 				// here takes a POST today, which is exactly the kind of thing
@@ -50,13 +59,21 @@ func ForceHTTPS(enabled bool) func(http.Handler) http.Handler {
 	}
 }
 
-// secure reports whether the browser's own connection was over TLS.
-func secure(r *http.Request) bool {
-	if r.TLS != nil {
-		return true
+// forwardedProto reports the scheme the proxy said the browser used, and
+// whether it said anything at all.
+//
+// A proxy may list several, oldest first — "https, http" — and the first is the
+// hop that matters, because that is the one the browser made.
+func forwardedProto(r *http.Request) (string, bool) {
+	raw := r.Header.Get("X-Forwarded-Proto")
+	if raw == "" {
+		return "", false
 	}
 
-	// A proxy may list several, oldest first: "https, http".
-	proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
-	return strings.EqualFold(strings.TrimSpace(proto), "https")
+	first, _, _ := strings.Cut(raw, ",")
+	first = strings.TrimSpace(first)
+	if first == "" {
+		return "", false
+	}
+	return first, true
 }
