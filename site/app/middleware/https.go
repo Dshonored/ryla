@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -28,7 +29,7 @@ import (
 func ForceHTTPS() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			proto, ok := forwardedProto(r)
+			proto, ok := visitorScheme(r)
 			if !ok {
 				// Nothing in front of us, so there is no https address to
 				// promise and nothing to redirect to.
@@ -59,21 +60,35 @@ func ForceHTTPS() func(http.Handler) http.Handler {
 	}
 }
 
-// forwardedProto reports the scheme the proxy said the browser used, and
-// whether it said anything at all.
+// visitorScheme reports the scheme the browser itself used, and whether
+// anything in front of this process said so.
 //
-// A proxy may list several, oldest first — "https, http" — and the first is the
-// hop that matters, because that is the one the browser made.
-func forwardedProto(r *http.Request) (string, bool) {
-	raw := r.Header.Get("X-Forwarded-Proto")
-	if raw == "" {
-		return "", false
+// CF-Visitor comes first because it is the only header that still knows.
+// Cloudflare terminates TLS at its edge and reaches the origin over a separate
+// connection of its own, so X-Forwarded-Proto arrives saying https whatever the
+// visitor typed — which is why the redirect below appeared to work, issued HSTS
+// on every response, and never once fired for the plaintext request it was
+// written for.
+//
+// Neither header is worth defending against forgery. Claiming https skips a
+// redirect for the caller who claimed it and nobody else; claiming http earns
+// one. There is nothing to gain either way.
+func visitorScheme(r *http.Request) (string, bool) {
+	// {"scheme":"http"}
+	if raw := r.Header.Get("CF-Visitor"); raw != "" {
+		var visitor struct {
+			Scheme string `json:"scheme"`
+		}
+		if err := json.Unmarshal([]byte(raw), &visitor); err == nil && visitor.Scheme != "" {
+			return visitor.Scheme, true
+		}
 	}
 
-	first, _, _ := strings.Cut(raw, ",")
-	first = strings.TrimSpace(first)
-	if first == "" {
-		return "", false
+	// A proxy may list several, oldest first — "https, http" — and the first is
+	// the hop that matters, because that is the one the browser made.
+	first, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+	if first = strings.TrimSpace(first); first != "" {
+		return first, true
 	}
-	return first, true
+	return "", false
 }
