@@ -35,6 +35,7 @@ import (
 	"github.com/Dshonored/ryla/session"
 	sessionredis "github.com/Dshonored/ryla/session/redis"
 
+	appmw "ryla-site/app/middleware"
 	"ryla-site/config"
 
 	// Registers the SQL driver this project was generated for.
@@ -146,6 +147,10 @@ func New() (*App, error) {
 	r.Use(middleware.WithLogger(logger))
 	r.Use(middleware.Logger(logger))
 	r.Use(middleware.Recover(logger, cfg.Debug))
+	// Before the session and the CSRF token are touched: a request that is
+	// about to be redirected has no business being given a cookie, and the
+	// redirect is cheaper than the work it skips.
+	r.Use(appmw.ForceHTTPS(strings.HasPrefix(cfg.URL, "https://")))
 	r.Use(session.Middleware(sessions, logger))
 	r.Use(csrf.Protect(csrf.Config{
 		Jar: jar,

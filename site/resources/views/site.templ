@@ -141,10 +141,15 @@ templ siteNav(s Site) {
 
 // installCommand is the one that works today. It is long enough that the hero
 // pill is sized around it rather than the other way round.
+//
+// The https:// is written out rather than left to a redirect. Without a scheme
+// curl tries http first, and the answer to that request is a shell script this
+// line pipes straight into a shell — so the one hop nobody can see is the one
+// that decides what runs.
 templ installLine(id string) {
 	<div class="install" data-copy id={ id }>
 		<span class="install-prompt">$</span>
-		<code class="install-cmd">curl -fsSL <span class="install-host">ryla.io/</span>install.sh | sh</code>
+		<code class="install-cmd">curl -fsSL <span class="install-host">https://ryla.io/</span>install.sh | sh</code>
 		<span class="install-sep"></span>
 		<button class="install-copy" type="button" aria-label="Copy install command">
 			@copyMark()

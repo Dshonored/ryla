@@ -95,7 +95,10 @@ func TestTheLandingPageRenders(t *testing.T) {
 		AssertOK().
 		AssertContains(
 			"Laravel's productivity",
-			"ryla.io/",
+			// With the scheme. Without one, curl tries http first, and the
+			// reply to that request is a script the same line pipes into a
+			// shell.
+			"https://ryla.io/",
 			"install.sh | sh",
 			"Dshonored/ryla",
 		)

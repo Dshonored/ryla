@@ -2,11 +2,14 @@
 package commands
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -98,6 +101,8 @@ CLI that generates the boilerplate so you do not have to write it.
   ry new myapp     scaffold a project
   ry dev           run it with live reload
   ry build         compile a single static binary
+
+Documentation: https://ryla.io
 `),
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -105,6 +110,13 @@ CLI that generates the boilerplate so you do not have to write it.
 	}
 
 	cmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "disable coloured output")
+
+	// Every command is a chance to mention a release nobody has noticed. The
+	// nudge used to live in `ry dev` alone, which meant somebody generating a
+	// project, running migrations and writing controllers for a week could miss
+	// it entirely — and then find that a feature the documentation describes is
+	// not in the version they are running.
+	cmd.PersistentPostRun = func(c *cobra.Command, _ []string) { showUpdateNotice(c) }
 
 	cmd.AddCommand(
 		newCmd(),
@@ -124,11 +136,94 @@ CLI that generates the boilerplate so you do not have to write it.
 
 // Execute runs the CLI and returns a process exit code.
 func Execute() int {
-	if err := Root().Execute(); err != nil {
+	// ExecuteC rather than Execute, for the command that actually failed: an
+	// unknown command or an unrecognised flag is the single most likely moment
+	// for the CLI to be the thing that is out of date, so that is exactly when
+	// the notice is worth printing.
+	executed, err := Root().ExecuteC()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
+		showUpdateNotice(executed)
 		return 1
 	}
 	return 0
+}
+
+// noticeOnce keeps the nudge to one appearance per process, however many paths
+// reach for it.
+var noticeOnce sync.Once
+
+// showUpdateNotice prints the update nudge, if there is one to print.
+//
+// On stderr, always: `ry routes` and the --json flags exist to be piped into
+// something, and a friendly sentence in the middle of that output is a parse
+// error rather than a kindness.
+func showUpdateNotice(cmd *cobra.Command) {
+	noticeOnce.Do(func() {
+		if !wantsUpdateNotice(cmd) {
+			return
+		}
+		if msg := updateNotice(commandContext(cmd)); msg != "" {
+			fmt.Fprintf(os.Stderr, "\n%s\n", msg)
+		}
+	})
+}
+
+// wantsUpdateNotice reports whether this run should be interrupted with one.
+func wantsUpdateNotice(cmd *cobra.Command) bool {
+	// Nobody is reading. A script, a pipe or a CI job gets nothing, which is
+	// also what stops this appearing in the middle of captured output.
+	if !isTerminal(os.Stderr) {
+		return false
+	}
+	return !noticeSuppressed(cmd)
+}
+
+// noticeSuppressed reports whether this command answers the question itself.
+func noticeSuppressed(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+
+	switch strings.Fields(cmd.Use)[0] {
+	// These report the versions themselves, in more detail than a one-liner.
+	case "version", "update":
+		return true
+	// dev prints it under its own banner, where it stays visible for as long as
+	// the server runs rather than scrolling past at the end.
+	case "dev":
+		return true
+	}
+	return false
+}
+
+// commandContext is the running command's context, or a usable one when cobra
+// has not attached it — which is the case when execution failed before the
+// command was reached.
+func commandContext(cmd *cobra.Command) context.Context {
+	if cmd == nil {
+		return context.Background()
+	}
+	if ctx := cmd.Context(); ctx != nil {
+		return ctx
+	}
+	return context.Background()
+}
+
+// isTerminal reports whether w is an interactive terminal.
+//
+// A local copy of the same three lines the log package uses. Exporting it from
+// there would make a framework promise out of a detail this CLI happens to need.
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(interface{ Stat() (os.FileInfo, error) })
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 // currentProject locates the project the command is being run from.

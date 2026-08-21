@@ -9,8 +9,10 @@ Ryla takes both, and drops the parts that only make sense in PHP — there are n
 facades, no service container and no runtime resolution. `ry` generates real Go
 files you can read, step through and delete.
 
+Documentation: **[ryla.io](https://ryla.io)**
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Dshonored/ryla/main/install.sh | sh
+curl -fsSL https://ryla.io/install.sh | sh
 
 ry new myapp
 cd myapp
@@ -25,7 +27,17 @@ of installing Ryla rather than a prerequisite to read about first. Re-running
 the script updates `ry` in place.
 
 Already have Go, or on Windows? `go install github.com/Dshonored/ryla/cmd/ry@latest`
-does the same job, and `ry update --self` keeps it current afterwards.
+does the same job, and `ry update --self` keeps it current afterwards. The
+script is the same file this repository ships as `install.sh`, served from
+[ryla.io/install.sh](https://ryla.io/install.sh); read it before you pipe it
+anywhere, as you should with any install script. The `https://` is written out
+rather than left to a redirect: a script that arrives over plain HTTP is a
+script anyone on the network can replace, and this one runs as soon as it
+lands.
+
+`ry` says so itself when a release appears: any command will mention it once,
+and it tells a CLI that is behind apart from a project still pinned to an older
+framework, since those need different commands to fix.
 
 ## The CLI
 

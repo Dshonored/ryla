@@ -240,15 +240,32 @@ func writeJSON(out io.Writer, v any) error {
 	return enc.Encode(v)
 }
 
-// updateNotice returns a one-line nudge when a newer release exists, or "".
-// It is what `ry dev` shows under its banner.
+// updateNotice returns a one-line nudge when something is out of date, or "".
+//
+// Two things can be behind, and they are worth telling apart. The CLI is the
+// obvious one. The project's pinned framework version is the one that actually
+// catches people out: `ry` can be perfectly current while the application it is
+// building is a release or two back, and the symptom of that is a feature the
+// documentation describes not existing — which reads as a broken framework
+// rather than as an old dependency.
 func updateNotice(ctx context.Context) string {
-	if IsDevVersion() {
+	status, err := gatherStatus(ctx, false)
+	if err != nil || status.Latest == "" {
 		return ""
 	}
-	info, ok := release.Cached(ctx, rylaModule)
-	if !ok || !release.IsNewer(Version(), info.Version) {
-		return ""
+
+	switch {
+	case status.CLIOutdated && status.FrameworkOutdated:
+		return fmt.Sprintf("update available: ry %s and this project are behind %s  ·  run `ry update --all`",
+			status.CLI, status.Latest)
+
+	case status.CLIOutdated:
+		return fmt.Sprintf("update available: ry %s → %s  ·  run `ry update --self`",
+			status.CLI, status.Latest)
+
+	case status.FrameworkOutdated:
+		return fmt.Sprintf("this project is on ryla %s, and %s is out  ·  run `ry update`",
+			status.Framework, status.Latest)
 	}
-	return fmt.Sprintf("update available: %s → %s  ·  run `ry update --all`", Version(), info.Version)
+	return ""
 }
