@@ -113,3 +113,58 @@ func TestDirectTLSIsNotRedirected(t *testing.T) {
 		t.Errorf("status = %d, want the request served", rec.Code)
 	}
 }
+
+// TestCloudflareVisitorSchemeWins is the header that made the difference.
+//
+// Cloudflare terminates TLS at its edge and reaches this process over its own
+// connection, so X-Forwarded-Proto says https for a visitor who typed http.
+// Reading it alone meant the redirect never fired in production while looking,
+// from the inside and from the tests, exactly as though it had.
+func TestCloudflareVisitorSchemeWins(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	req := request("https") // what Cloudflare tells the origin either way
+	req.Header.Set("CF-Visitor", `{"scheme":"http"}`)
+	ForceHTTPS()(ok()).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPermanentRedirect {
+		t.Errorf("status = %d, want a redirect for a plaintext visitor", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "#!/bin/sh") {
+		t.Error("the script was served to a plaintext visitor")
+	}
+}
+
+// TestASecureVisitorBehindCloudflareIsServed is the same header saying the
+// visitor was already on https, which must not become a redirect to the address
+// they are on.
+func TestASecureVisitorBehindCloudflareIsServed(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	req := request("https")
+	req.Header.Set("CF-Visitor", `{"scheme":"https"}`)
+	ForceHTTPS()(ok()).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", rec.Code)
+	}
+	if rec.Header().Get("Strict-Transport-Security") == "" {
+		t.Error("a secure visitor was not told to stay secure")
+	}
+}
+
+// TestAnUnreadableVisitorHeaderFallsBack covers the header arriving as
+// something other than the JSON object it is documented to be. Falling back to
+// X-Forwarded-Proto keeps the old behaviour rather than deciding the request
+// came from nowhere.
+func TestAnUnreadableVisitorHeaderFallsBack(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	req := request("http")
+	req.Header.Set("CF-Visitor", "not-json")
+	ForceHTTPS()(ok()).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusPermanentRedirect {
+		t.Errorf("status = %d, want the X-Forwarded-Proto answer", rec.Code)
+	}
+}
