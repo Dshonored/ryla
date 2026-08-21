@@ -32,6 +32,40 @@ routes in `routes/web.go`, `resources/static/demo.js`, the `Env` struct in
 tokens and components. Keep it and build on it, or replace it; nothing in the
 framework depends on those class names.
 
+## This site answers machines as well as people
+
+Four things here are not visible on the page and break silently, so they have
+feature tests in `tests/agents_test.go` rather than a manual check.
+
+**Prose pages are content, not markup.** `/about`, `/contact` and `/privacy` are
+`views.Doc` values in `resources/views/content.go`, rendered twice: as the
+designed page by `views.Prose`, and as markdown by `Doc.Markdown`. Edit the Doc,
+never one representation — the point of the type is that the two cannot say
+different things. The landing page has a Doc too, built in
+`app/controllers/home.go` from the same batteries, stats and statuses the page
+renders.
+
+**Every page negotiates on Accept.** A request carrying `Accept: text/markdown`
+gets markdown; everything else, `*/*` included, gets the page. The same content
+is at the address with `.md` appended. Any response whose body depends on the
+request must send `Vary: Accept, Accept-Encoding` — without it a CDN serves one
+audience the other's answer, and which one is decided by who asked first. The
+helpers are in `app/controllers/markdown.go`; use `negotiable` before rendering
+HTML and `writeMarkdown` for the other branch.
+
+**A missing address answers 404 with a body worth reading.**
+`routes/web.go` registers `pages.NotFound`, which returns the `views.NotFound`
+Doc — markdown for a client that asked for it, and the page for everyone else,
+with the same markdown shown in a panel on it. Never let an unknown path answer
+200: an application that serves its shell for every address tells a crawler that
+every address exists.
+
+**llms.txt and agents.md say when to reach for Ryla, not just what it is.**
+Both live in `app/controllers/wellknown.go` and
+`resources/views/content.go`. If the framework gains or loses a capability —
+OAuth, a database that becomes better proven — the "when to use" and "when not
+to use" lists are part of that change, not documentation to catch up later.
+
 ## Do not edit these
 
 - **`*_templ.go`** — generated from the neighbouring `.templ` file by

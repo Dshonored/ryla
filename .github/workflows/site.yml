@@ -119,10 +119,10 @@ jobs:
             fi
             sleep 1
           done
-          curl -fsS -o /dev/null -w 'GET /            %{http_code}\n' http://127.0.0.1:8080/
-          curl -fsS -o /dev/null -w 'GET /install.sh  %{http_code}\n' http://127.0.0.1:8080/install.sh
-          curl -fsS -o /dev/null -w 'GET /llms.txt    %{http_code}\n' http://127.0.0.1:8080/llms.txt
-          curl -fsS -o /dev/null -w 'GET /sitemap.xml %{http_code}\n' http://127.0.0.1:8080/sitemap.xml
+          for path in / /about /contact /privacy /index.md /about.md /contact.md /privacy.md \
+                      /install.sh /llms.txt /agents.md /robots.txt /sitemap.xml; do
+            curl -fsS -o /dev/null -w "GET $path %{http_code}\n" "http://127.0.0.1:8080$path"
+          done
           # The one that would be embarrassing to get wrong: what people pipe
           # into a shell has to be a shell script.
           curl -fsS http://127.0.0.1:8080/install.sh | head -1 | grep -q '^#!/bin/sh'
@@ -131,3 +131,42 @@ jobs:
           curl -fsS http://127.0.0.1:8080/llms.txt | grep '^Current version:'
           curl -fsS http://127.0.0.1:8080/llms.txt | grep -q '^Current version: v'             || { echo "::error::the site reports no released version"; exit 1; }
           docker rm -f ryla-site-ci
+
+      # The three things an agent audit checks that a rendering page cannot
+      # tell you about. They are checked here as well as in the feature tests
+      # because this is the built image answering over a real socket, which is
+      # where a proxy or a header set in the wrong place would show up.
+      - name: It answers machines correctly
+        run: |
+          docker run -d --name ryla-site-agents -p 8081:8080 \
+            -e APP_KEY="base64:$(openssl rand -base64 32)" ryla-site:ci
+          for i in $(seq 1 20); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8081/up; then break; fi
+            sleep 1
+          done
+
+          # A real 404 for a path that does not exist. A 200 here would tell
+          # every crawler that every address on this domain exists.
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8081/some-path-that-does-not-exist)
+          echo "GET /some-path-that-does-not-exist $code"
+          [ "$code" = "404" ] || { echo "::error::a missing path answered $code, not 404"; exit 1; }
+
+          # ...and a body an agent can act on rather than a bare status.
+          curl -s -H 'Accept: text/markdown' http://127.0.0.1:8081/some-path-that-does-not-exist \
+            | grep -q 'llms.txt' || { echo "::error::the 404 body points nowhere"; exit 1; }
+
+          # Markdown content negotiation, including the Vary header without
+          # which a CDN serves one audience the other's answer.
+          curl -sS -D /tmp/md.h -o /dev/null -H 'Accept: text/markdown' http://127.0.0.1:8081/
+          grep -qi '^content-type: text/markdown' /tmp/md.h || { echo "::error::Accept: text/markdown did not return markdown"; exit 1; }
+          grep -qi '^vary:.*accept' /tmp/md.h            || { echo "::error::the markdown response is missing Vary: Accept"; exit 1; }
+
+          curl -sS -D /tmp/html.h -o /dev/null -H 'Accept: text/html' http://127.0.0.1:8081/
+          grep -qi '^content-type: text/html' /tmp/html.h || { echo "::error::a browser stopped getting the page"; exit 1; }
+          grep -qi '^vary:.*accept' /tmp/html.h          || { echo "::error::the page response is missing Vary: Accept"; exit 1; }
+
+          # The agent instructions say when to reach for Ryla, not just what it is.
+          curl -fsS http://127.0.0.1:8081/llms.txt  | grep -q '## When to use Ryla' || { echo "::error::llms.txt has no when-to-use guidance"; exit 1; }
+          curl -fsS http://127.0.0.1:8081/agents.md | grep -q '## How to call it'   || { echo "::error::agents.md has no calling guidance"; exit 1; }
+
+          docker rm -f ryla-site-agents
