@@ -78,6 +78,7 @@ WORKDIR /
 # inside the container is right — the container is the boundary. Nothing is
 # published to the host, and the tunnel is what faces the internet.
 ENV APP_ENV=production \
+    APP_URL=https://ryla.io \
     HTTP_ADDR=0.0.0.0:8080 \
     DB_DSN=/storage/ryla-site.db
 
