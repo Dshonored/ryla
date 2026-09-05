@@ -43,25 +43,40 @@ type Status struct {
 	State, Tone, What string
 }
 
-templ SiteLayout(title string, s Site) {
+templ SiteLayout(m Meta, s Site) {
 	<!DOCTYPE html>
 	<html lang="en">
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<meta name="color-scheme" content="dark light"/>
-			<title>{ title }</title>
-			<meta name="description" content={ Description }/>
+			<title>{ m.Title }</title>
+			<meta name="description" content={ m.Description }/>
 			<meta name="google-site-verification" content={ SearchConsoleToken }/>
-			<link rel="canonical" href={ Origin + "/" }/>
+			if m.NoIndex {
+				// An error page in a search result is a result that wastes
+				// everyone's time, so this is the one page that asks not to be
+				// indexed. It still answers agents in full — noindex is a
+				// request about search listings, not a refusal to be read. It
+				// declares no canonical address either: a page that is not
+				// there has none to declare.
+				<meta name="robots" content="noindex, follow"/>
+			} else {
+				<link rel="canonical" href={ m.Canonical() }/>
+				// The same page, as markdown. Sent as a <link> and, from the
+				// handler, as an RFC 8288 Link header — so a client that never
+				// negotiates on Accept can still discover the representation
+				// it would rather have had.
+				<link rel="alternate" type="text/markdown" href={ m.MarkdownURL() } title="This page as markdown"/>
+			}
 			// Open Graph and Twitter cards. A framework gets shared as a link in
 			// chat far more often than it gets found in a search result, so the
 			// card is the first impression more often than the page is.
 			<meta property="og:type" content="website"/>
 			<meta property="og:site_name" content="Ryla"/>
-			<meta property="og:title" content={ title }/>
-			<meta property="og:description" content={ Description }/>
-			<meta property="og:url" content={ Origin + "/" }/>
+			<meta property="og:title" content={ m.Title }/>
+			<meta property="og:description" content={ m.Description }/>
+			<meta property="og:url" content={ m.Canonical() }/>
 			<meta property="og:image" content={ Origin + "/static/og.png" }/>
 			// Stated so a scraper can lay out the card before it has fetched the
 			// image, and so one that never fetches it still gets the dimensions
@@ -70,12 +85,13 @@ templ SiteLayout(title string, s Site) {
 			<meta property="og:image:height" content="630"/>
 			<meta property="og:image:alt" content={ Description }/>
 			<meta name="twitter:card" content="summary_large_image"/>
-			<meta name="twitter:title" content={ title }/>
-			<meta name="twitter:description" content={ Description }/>
+			<meta name="twitter:title" content={ m.Title }/>
+			<meta name="twitter:description" content={ m.Description }/>
 			<meta name="twitter:image" content={ Origin + "/static/og.png" }/>
-			// Structured data. SoftwareSourceCode is the accurate type for a
-			// library; SoftwareApplication would claim this is something you run.
-			@templ.Raw(structuredData(s))
+			// Structured data, built by the page rather than the layout: the
+			// landing page describes a project, and a prose page describes
+			// itself.
+			@templ.Raw(m.JSONLD)
 			<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20100%20100%22%20fill%3D%22none%22%3E%3ClinearGradient%20id%3D%22l%22%20x1%3D%2244%22%20y1%3D%2254%22%20x2%3D%2274%22%20y2%3D%2282%22%20gradientUnits%3D%22userSpaceOnUse%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23ededed%22%2F%3E%3Cstop%20offset%3D%22.65%22%20stop-color%3D%22%230072f5%22%2F%3E%3C%2FlinearGradient%3E%3Cpath%20d%3D%22M28%2018V82%22%20stroke%3D%22%23ededed%22%20stroke-width%3D%2214%22%2F%3E%3Cpath%20d%3D%22M28%2018H58L72%2032V40L58%2054H28%22%20stroke%3D%22%23ededed%22%20stroke-width%3D%2214%22%2F%3E%3Cpath%20d%3D%22M44%2054L74%2082%22%20stroke%3D%22url%28%23l%29%22%20stroke-width%3D%2214%22%2F%3E%3C%2Fsvg%3E"/>
 			<link rel="stylesheet" href="/static/app.css"/>
 			<link rel="stylesheet" href="/static/site.css"/>
@@ -125,8 +141,11 @@ templ siteNav(s Site) {
 			<nav class="nav-links">
 				<a href={ templ.SafeURL(s.URL() + "#readme") }>Docs</a>
 				<a href={ templ.SafeURL(s.URL() + "#the-cli") }>CLI</a>
-				<a href="#batteries">Batteries</a>
-				<a href="#status">Status</a>
+				// Rooted, not bare fragments: these live in the layout, so
+				// they are rendered on /about and /privacy too, where
+				// "#batteries" points at a section that is not on the page.
+				<a href="/#batteries">Batteries</a>
+				<a href="/#status">Status</a>
 			</nav>
 		</div>
 		<div class="nav-right">
@@ -157,8 +176,20 @@ templ installLine(id string) {
 	</div>
 }
 
+// LandingMeta describes the home page to a machine. It is a function rather
+// than a constant because the structured-data block is built from the running
+// version.
+func LandingMeta(s Site) Meta {
+	return Meta{
+		Title:       "Ryla — a batteries-included web framework for Go",
+		Description: Description,
+		Path:        "/",
+		JSONLD:      structuredData(s),
+	}
+}
+
 templ Landing(s Site, batteries []Battery, stats []Stat, statuses []Status) {
-	@SiteLayout("Ryla — a batteries-included web framework for Go", s) {
+	@SiteLayout(LandingMeta(s), s) {
 		<section class="hero" data-hero>
 			<span class="badge">Pre-1.0 · { s.Version }</span>
 			<h1 class="hero-title">Laravel's productivity.<br/>Go's deploy story.</h1>
@@ -344,6 +375,103 @@ templ siteFooter(s Site) {
 			<span class="dim">·</span>
 			<a class="dim" href={ templ.SafeURL(s.LicenseURL()) }>MIT</a>
 		</div>
+		// The pages that answer "is this a real project, made by someone
+		// reachable?" — linked from every page, because that question is asked
+		// from whichever one the visitor landed on.
+		<nav class="foot-links">
+			<a href="/about">About</a>
+			<a href="/contact">Contact</a>
+			<a href="/privacy">Privacy</a>
+			<a href="/llms.txt">llms.txt</a>
+		</nav>
 		<span class="dim">Served by Ryla { s.Version }</span>
 	</footer>
+}
+
+// Prose renders one of the site's written pages.
+//
+// A single component for all of them, driven by the Doc, so /about, /contact
+// and /privacy cannot drift apart in layout the way three hand-written
+// templates would. The words are the only thing that differs between them, and
+// the words live in content.go.
+templ Prose(s Site, d Doc) {
+	@SiteLayout(d.Meta(), s) {
+		<article class="band prose">
+			<div class="wrap">
+				<header class="stack head" data-reveal>
+					<span class="eyebrow">{ d.Eyebrow }</span>
+					<h1>{ d.Title }</h1>
+					<p class="lead">{ d.Summary }</p>
+				</header>
+				for _, sec := range d.Sections {
+					<section class="prose-section" data-reveal>
+						if sec.Heading != "" {
+							<h2>{ sec.Heading }</h2>
+						}
+						for _, para := range sec.Body {
+							<p>@templ.Raw(inlineHTML(para))</p>
+						}
+						if len(sec.Points) > 0 {
+							<dl class="prose-points">
+								for _, pt := range sec.Points {
+									<dt>{ pt.Term }</dt>
+									<dd>@templ.Raw(inlineHTML(pt.Detail))</dd>
+								}
+							</dl>
+						}
+					</section>
+				}
+				if len(d.Links) > 0 {
+					<section class="prose-section" data-reveal>
+						<h2>Elsewhere on this site</h2>
+						<dl class="prose-points">
+							for _, l := range d.Links {
+								<dt><a href={ templ.SafeURL(l.URL) }>{ l.Label }</a></dt>
+								<dd>{ l.Note }</dd>
+							}
+						</dl>
+					</section>
+				}
+			</div>
+		</article>
+	}
+}
+
+// notFoundMeta describes the 404. It asks not to be indexed and claims no
+// canonical address, because the address it was reached at does not exist.
+func notFoundMeta() Meta {
+	return Meta{
+		Title:       "Page not found — Ryla",
+		Description: NotFound.Summary,
+		Path:        "/404",
+		NoIndex:     true,
+	}
+}
+
+// NotFoundPage is the 404.
+//
+// The panel at the bottom is the same markdown an agent receives when it asks
+// this address for text/markdown, shown rather than hidden. That is not a
+// gimmick: it means the recovery instructions exist in exactly one place, and
+// a client that only ever reads rendered HTML still gets them.
+templ NotFoundPage(s Site, d Doc) {
+	@SiteLayout(notFoundMeta(), s) {
+		<section class="hero">
+			<span class="badge">404</span>
+			<h1 class="hero-title">Page not found.</h1>
+			<p class="hero-sub">{ d.Summary }</p>
+			<div class="notfound-links">
+				for _, l := range d.Links {
+					<a href={ templ.SafeURL(l.URL) }>{ l.Label }</a>
+				}
+			</div>
+			<div class="code notfound-md" data-reveal>
+				<div class="code-bar">
+					<span>404.md</span>
+					<span class="tag">FOR AGENTS</span>
+				</div>
+				<pre class="code-body">{ d.Markdown() }</pre>
+			</div>
+		</section>
+	}
 }

@@ -2,8 +2,7 @@ package controllers
 
 import (
 	"net/http"
-
-	"github.com/Dshonored/ryla"
+	"strings"
 
 	"ryla-site/app"
 	"ryla-site/resources/views"
@@ -23,13 +22,125 @@ func NewHome(a *app.App) *Home {
 
 // Index handles GET /.
 //
-// The version comes from ryla.Version(), which reads the build info rather than
-// a constant — so the badge in the header and the line in the footer cannot
-// advertise a release that does not exist, and there is no number to remember
-// to bump. A build from a local checkout reports "dev", which is the truth.
+// One address, two representations: the page a person came for, and — when the
+// request says `Accept: text/markdown` — the same offer as markdown, for a
+// client that is going to strip the markup anyway. Vary: Accept goes on both,
+// so no cache between here and the client can serve one to an audience that
+// asked for the other.
 func (c *Home) Index(w http.ResponseWriter, r *http.Request) {
-	site := views.Site{Version: ryla.Version(), Repo: "Dshonored/ryla"}
+	site := c.Site()
+
+	if prefersMarkdown(r) {
+		writeMarkdown(w, http.StatusOK, landingDoc(site).Markdown())
+		return
+	}
+
+	negotiable(w, views.LandingMeta(site))
 	c.Render(w, r, views.Landing(site, batteries, stats, statuses))
+}
+
+// Markdown handles GET /index.md: the landing page, by address rather than by
+// negotiation.
+func (c *Home) Markdown(w http.ResponseWriter, r *http.Request) {
+	writeMarkdownAlias(w, views.Origin+"/", landingDoc(c.Site()).Markdown())
+}
+
+// landingDoc is the landing page as content.
+//
+// It is built from the same batteries, stats and statuses the page renders, so
+// the markdown an agent reads cannot claim a feature the page does not, or miss
+// one it added. The prose is written for a reader who wants the facts without
+// the choreography.
+func landingDoc(s views.Site) views.Doc {
+	version := s.Version
+	if version == "" {
+		version = "dev"
+	}
+
+	batteryPoints := make([]views.Point, 0, len(batteries))
+	for _, b := range batteries {
+		batteryPoints = append(batteryPoints, views.Point{
+			Term:   b.Name + " (`" + b.Cmd + "`)",
+			Detail: b.Body,
+		})
+	}
+
+	statusPoints := make([]views.Point, 0, len(statuses))
+	for _, st := range statuses {
+		statusPoints = append(statusPoints, views.Point{Term: st.State, Detail: st.What})
+	}
+
+	measurements := make([]string, 0, len(stats))
+	for _, st := range stats {
+		measurements = append(measurements, st.Label+": "+st.Value+" "+st.Unit)
+	}
+
+	return views.Doc{
+		Slug:    "",
+		Eyebrow: "Ryla",
+		Title:   "Ryla — a batteries-included web framework for Go",
+		Summary: views.Description,
+		Sections: []views.Section{
+			{
+				Heading: "Install",
+				Body: []string{
+					"    curl -fsSL " + views.Origin + "/install.sh | sh",
+					"The script installs a Go toolchain if the machine has none, installs `ry`, and " +
+						"adds both to your shell's PATH, on macOS and Linux. On Windows, or with Go " +
+						"already present:",
+					"    go install github.com/Dshonored/ryla/cmd/ry@latest",
+					"Current version: " + version + ". Module path: github.com/Dshonored/ryla. Licence: MIT.",
+				},
+			},
+			{
+				Heading: "One command",
+				Body: []string{
+					"`ry new` asks four questions — a database, a web mode, a frontend language and a " +
+						"stylesheet — and wires the answers together. Every combination compiles: " +
+						"twenty-four of them are scaffolded and built on every CI run, on Linux, macOS " +
+						"and Windows.",
+				},
+				Points: []views.Point{
+					{Term: "Database", Detail: "sqlite, postgres, mysql, mongo"},
+					{Term: "Web mode", Detail: "mvc, api, react, svelte"},
+					{Term: "Frontend", Detail: "TypeScript or JavaScript"},
+					{Term: "Styling", Detail: "Tailwind or plain CSS"},
+				},
+			},
+			{
+				Heading: "Batteries",
+				Body:    []string{"Not a list of packages you assemble. One framework where the session store, the queue driver and the mailer already know about each other."},
+				Points:  batteryPoints,
+			},
+			{
+				Heading: "No container, no facades",
+				Body: []string{
+					"`App` is a plain struct. Controllers hold a pointer to it and reach for what they " +
+						"need, so every dependency is visible and the compiler checks all of it — " +
+						"nothing resolves at runtime.",
+					"Generators never edit your files. `ry make:controller` writes a new file and prints " +
+						"the route lines to add, so `routes/web.go` stays a table of contents you can " +
+						"trust. Views are compiled: templ turns components into Go, so a typo or a wrong " +
+						"argument is a build error rather than a blank space in production.",
+				},
+			},
+			{
+				Heading: "Deploy",
+				Body: []string{
+					"`ry build` compiles the views, the frontend bundle and the static assets into a " +
+						"single static binary that carries its own commands. The machine that runs it " +
+						"needs no Go toolchain, no Node and no `ry`.",
+					strings.Join(measurements, ". ") + ".",
+				},
+			},
+			{
+				Heading: "Status",
+				Body:    []string{"Ryla is pre-1.0, and specific about it: features are sorted by how well each one is actually tested rather than by whether it is finished."},
+				Points:  statusPoints,
+			},
+		},
+		Links: views.HomeLinks(),
+	}
 }
 
 // What the framework already ships. This is content rather than configuration,

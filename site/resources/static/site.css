@@ -618,6 +618,122 @@ html[data-motion="off"] .progress-bar {
 	color: var(--text-disabled);
 }
 
+/* --- Written pages ------------------------------------------------------- */
+
+/* /about, /contact and /privacy. One layout for all three, driven by the Doc
+   that also renders them as markdown — so the page a person reads and the
+   markdown an agent asks for are the same words in two shapes. */
+
+.prose h1 {
+	font-size: var(--text-3xl);
+	letter-spacing: -0.03em;
+	line-height: 1.1;
+}
+
+/* One measure for the whole page — roughly 80 characters — and everything
+   inside it inherits that width. Paragraphs capped separately from the column
+   they sit in is how a list ends up with rules that stop short of the text
+   above them. */
+.prose .wrap {
+	max-width: 680px;
+}
+
+.prose .lead {
+	max-width: none;
+}
+
+.prose-section + .prose-section {
+	margin-top: var(--space-12);
+}
+
+.prose-section h2 {
+	font-size: var(--text-xl);
+	letter-spacing: -0.02em;
+	margin-bottom: var(--space-5);
+}
+
+.prose-section p {
+	margin-top: var(--space-4);
+	font-size: var(--text-md);
+	line-height: 1.65;
+	color: var(--text-secondary);
+	text-wrap: pretty;
+}
+
+/* Term above detail rather than beside it: several of these terms are full
+   sentences, and a two-column list would set them in a gutter narrow enough to
+   break every one of them across three lines. */
+.prose-points {
+	margin-top: var(--space-6);
+	border-top: 1px solid var(--border-subtle);
+}
+
+.prose-points dt {
+	margin-top: var(--space-5);
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+	color: var(--text-primary);
+}
+
+.prose-points dd {
+	margin: var(--space-2) 0 var(--space-5);
+	font-size: var(--text-base);
+	line-height: 1.65;
+	color: var(--text-secondary);
+	border-bottom: 1px solid var(--border-subtle);
+	padding-bottom: var(--space-5);
+}
+
+.prose-points dd:last-child {
+	border-bottom: none;
+}
+
+/* --- 404 ----------------------------------------------------------------- */
+
+.notfound-links {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: var(--space-2) var(--space-5);
+	margin-top: var(--space-8);
+	font-family: var(--font-mono);
+	font-size: var(--text-sm);
+}
+
+/* The markdown an agent receives at this address, shown rather than hidden.
+   Left-aligned inside a centred hero because it is a document, not a caption. */
+.notfound-md {
+	width: 100%;
+	max-width: 760px;
+	margin-top: var(--space-10);
+	text-align: left;
+}
+
+/* Shown in full rather than in a scroll box. It is the only content on the
+   page, and half a line clipped at a fold reads as a rendering fault rather
+   than as something to scroll. */
+.notfound-md .code-body {
+	white-space: pre-wrap;
+	word-break: break-word;
+	color: var(--text-muted);
+}
+
+/* --- Footer links -------------------------------------------------------- */
+
+.foot-links {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2) var(--space-5);
+}
+
+.foot-links a {
+	color: var(--text-muted);
+}
+
+.foot-links a:hover {
+	color: var(--text-secondary);
+}
+
 /* --- Reveal floor -------------------------------------------------------- */
 
 /* Deliberately NOT opacity: 0 here. The animation supplies its own starting
@@ -711,5 +827,16 @@ html[data-motion="off"] .progress-bar {
 		align-items: flex-start;
 		gap: var(--space-2);
 		padding: var(--space-6) var(--space-4);
+	}
+
+	.prose h1 { font-size: var(--text-2xl); }
+	.prose-section h2 { font-size: var(--text-lg); }
+
+	/* Long URLs are the norm on these pages — a contact page is mostly
+	   addresses — and a phone is narrower than any of them. */
+	.prose-section p,
+	.prose-points dt,
+	.prose-points dd {
+		overflow-wrap: anywhere;
 	}
 }
