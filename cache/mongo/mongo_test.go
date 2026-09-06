@@ -82,7 +82,7 @@ func live(t *testing.T) *rymongo.Database {
 		t.Skip("skipping: set MONGO_TEST_URI to run the MongoDB integration tests")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	client, db, err := rymongo.Open(ctx, rymongo.Config{URI: uri, Database: "ryla_cache_test"})
@@ -104,7 +104,7 @@ func live(t *testing.T) *rymongo.Database {
 
 func TestLiveGetSetDelete(t *testing.T) {
 	db := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var store cache.Store = New(db, "test")
 
@@ -143,7 +143,7 @@ func TestLiveGetSetDelete(t *testing.T) {
 // after the first.
 func TestLiveSetOverwrites(t *testing.T) {
 	db := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	store := New(db, "test")
 
 	for _, want := range []string{"first", "second", "third"} {
@@ -177,7 +177,7 @@ func TestLiveSetOverwrites(t *testing.T) {
 // trust that the server has already removed it.
 func TestLiveExpiredEntryIsNotServed(t *testing.T) {
 	db := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	store := New(db, "test")
 
 	if err := store.Set(ctx, "brief", []byte("value"), 40*time.Millisecond); err != nil {
@@ -211,7 +211,7 @@ func TestLiveExpiredEntryIsNotServed(t *testing.T) {
 // rather than a date it would eventually collect.
 func TestLiveForeverEntryHasNoDeadline(t *testing.T) {
 	db := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	store := New(db, "test")
 
 	if err := store.Set(ctx, "permanent", []byte("value"), cache.Forever); err != nil {
@@ -249,7 +249,7 @@ func TestLiveForeverEntryHasNoDeadline(t *testing.T) {
 // as a miss would recompute it on every request.
 func TestLiveEmptyValueIsAHit(t *testing.T) {
 	db := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	store := New(db, "test")
 
 	if err := store.Set(ctx, "empty", []byte{}, time.Minute); err != nil {
@@ -270,7 +270,7 @@ func TestLiveEmptyValueIsAHit(t *testing.T) {
 // another application's cache, and every other collection, with it.
 func TestLiveClearLeavesEverythingElseAlone(t *testing.T) {
 	db := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	shop := New(db, "shop")
 	blog := New(db, "blog")
@@ -318,7 +318,7 @@ func TestLiveClearLeavesEverythingElseAlone(t *testing.T) {
 // when the collection has grown without bound.
 func TestLiveTTLIndexIsCreated(t *testing.T) {
 	db := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := rymongo.NewSyncer(db, quietLogger()).Sync(ctx); err != nil {
 		t.Fatalf("Sync: %v", err)

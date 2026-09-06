@@ -28,31 +28,24 @@ const MaxBodySize = 10 << 20 // 10 MB
 // ErrBodyTooLarge is returned when a request body exceeds MaxBodySize.
 var ErrBodyTooLarge = errors.New("validate: request body too large")
 
-var (
-	once     sync.Once
-	instance *validator.Validate
-)
+// shared returns the shared validator. It is built once because registering tag
+// name resolution is not cheap and the instance is safe for concurrent use.
+var shared = sync.OnceValue(func() *validator.Validate {
+	instance := validator.New(validator.WithRequiredStructEnabled())
 
-// validate returns the shared validator. It is built once because registering
-// tag name resolution is not cheap and the instance is safe for concurrent use.
-func shared() *validator.Validate {
-	once.Do(func() {
-		instance = validator.New(validator.WithRequiredStructEnabled())
-
-		// Report errors under the field's form name rather than its Go name, so
-		// ErrorBag keys match the name attributes in the template.
-		instance.RegisterTagNameFunc(func(f reflect.StructField) string {
-			for _, tag := range []string{"form", "json"} {
-				name := strings.Split(f.Tag.Get(tag), ",")[0]
-				if name != "" && name != "-" {
-					return name
-				}
+	// Report errors under the field's form name rather than its Go name, so
+	// ErrorBag keys match the name attributes in the template.
+	instance.RegisterTagNameFunc(func(f reflect.StructField) string {
+		for _, tag := range []string{"form", "json"} {
+			name := strings.Split(f.Tag.Get(tag), ",")[0]
+			if name != "" && name != "-" {
+				return name
 			}
-			return f.Name
-		})
+		}
+		return f.Name
 	})
 	return instance
-}
+})
 
 // Bind fills dst from the request, choosing the decoder from the content type:
 // JSON bodies are decoded as JSON, everything else is read as form values.
@@ -155,7 +148,7 @@ func bindForm(r *http.Request, dst any) error {
 	rv := reflect.ValueOf(dst).Elem()
 	rt := rv.Type()
 
-	for i := 0; i < rt.NumField(); i++ {
+	for i := range rt.NumField() {
 		field := rt.Field(i)
 		if !field.IsExported() {
 			continue

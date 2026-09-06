@@ -10,10 +10,11 @@ import (
 	"bytes"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"text/template"
 )
@@ -49,11 +50,7 @@ func (g *Generator) Run() ([]string, error) {
 		return nil, err
 	}
 
-	rels := make([]string, 0, len(files))
-	for rel := range files {
-		rels = append(rels, rel)
-	}
-	sort.Strings(rels)
+	rels := slices.Sorted(maps.Keys(files))
 
 	if !g.Force {
 		if err := g.checkCollisions(rels); err != nil {

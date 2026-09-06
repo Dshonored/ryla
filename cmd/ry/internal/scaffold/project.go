@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"path"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/Dshonored/ryla/cmd/ry/internal/naming"
@@ -247,7 +247,7 @@ func languageNames() []string {
 	for _, l := range languages {
 		out = append(out, l.Name)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -298,7 +298,7 @@ func stylingNames() []string {
 	for _, st := range stylings {
 		out = append(out, st.Name)
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -341,7 +341,7 @@ func availableDatabases() []string {
 			out = append(out, d.Name)
 		}
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -352,7 +352,7 @@ func availableWebModes() []string {
 			out = append(out, w.Name)
 		}
 	}
-	sort.Strings(out)
+	slices.Sort(out)
 	return out
 }
 

@@ -1,9 +1,11 @@
 package router
 
 import (
+	"cmp"
 	"fmt"
+	"maps"
 	"net/url"
-	"sort"
+	"slices"
 	"sync"
 )
 
@@ -73,10 +75,6 @@ func (reg *registry) all() []NamedRoute {
 	reg.mu.RLock()
 	defer reg.mu.RUnlock()
 
-	out := make([]NamedRoute, 0, len(reg.routes))
-	for _, rt := range reg.routes {
-		out = append(out, rt)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out
+	return slices.SortedFunc(maps.Values(reg.routes),
+		func(a, b NamedRoute) int { return cmp.Compare(a.Name, b.Name) })
 }

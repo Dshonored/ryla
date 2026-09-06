@@ -193,10 +193,8 @@ func (a *App) queueRetry(ctx context.Context, args []string) error {
 // firstLine keeps a multi-line error, such as a panic with its stack, from
 // wrecking the table.
 func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
+	first, _, _ := strings.Cut(s, "\n")
+	return first
 }
 
 func (a *App) scheduleRun(ctx context.Context, args []string) error {

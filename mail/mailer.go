@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/smtp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -232,8 +233,7 @@ func (m *MemoryMailer) Sent() []Message {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	out := make([]Message, len(m.sent))
-	copy(out, m.sent)
+	out := slices.Clone(m.sent)
 	return out
 }
 

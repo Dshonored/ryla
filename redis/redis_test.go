@@ -38,7 +38,7 @@ func server(t *testing.T) (*miniredis.Miniredis, *goredis.Client) {
 func TestCacheRoundTrip(t *testing.T) {
 	_, client := server(t)
 	s := cacheredis.New(client, "app")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, ok, err := s.Get(ctx, "absent"); ok || err != nil {
 		t.Errorf("Get on a missing key = %v, %v", ok, err)
@@ -64,7 +64,7 @@ func TestCacheRoundTrip(t *testing.T) {
 func TestCacheExpiry(t *testing.T) {
 	mr, client := server(t)
 	s := cacheredis.New(client, "app")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := s.Set(ctx, "k", []byte("v"), time.Minute); err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestCacheExpiry(t *testing.T) {
 // surprise from a method with this name.
 func TestCacheClearOnlyRemovesItsOwnKeys(t *testing.T) {
 	_, client := server(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	s := cacheredis.New(client, "cache")
 	if err := s.Set(ctx, "k", []byte("v"), cache.Forever); err != nil {
@@ -109,7 +109,7 @@ func TestCacheClearOnlyRemovesItsOwnKeys(t *testing.T) {
 func TestCacheRememberWorksOverRedis(t *testing.T) {
 	_, client := server(t)
 	s := cacheredis.New(client, "app")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var calls atomic.Int32
 	compute := func(context.Context) (string, error) {
@@ -117,7 +117,7 @@ func TestCacheRememberWorksOverRedis(t *testing.T) {
 		return "computed", nil
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		got, err := cache.Remember(ctx, s, "k", time.Minute, compute)
 		if err != nil || got != "computed" {
 			t.Fatalf("Remember = %q, %v", got, err)
@@ -166,10 +166,10 @@ func TestSessionRoundTrip(t *testing.T) {
 func TestSessionCanBeRevoked(t *testing.T) {
 	_, client := server(t)
 	store := sessionStore(t, client)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var cookies []*http.Cookie
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		rec := httptest.NewRecorder()
 		sess := session.New(time.Hour)
 		sess.Put(session.UserIDKey, "42")
@@ -207,7 +207,7 @@ func TestSessionMissingIsNotAnError(t *testing.T) {
 func TestQueuePushAndClaim(t *testing.T) {
 	_, client := server(t)
 	d := queueredis.New(client, "queue")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rec := &queue.Record{
 		Queue: queue.Default, Name: "redis.noop", Payload: `{"to":"alice"}`,
@@ -240,7 +240,7 @@ func TestQueuePushAndClaim(t *testing.T) {
 func TestQueueClaimIsExclusive(t *testing.T) {
 	_, client := server(t)
 	d := queueredis.New(client, "queue")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rec := &queue.Record{
 		Queue: queue.Default, Name: "redis.noop", Payload: "{}",
@@ -253,14 +253,12 @@ func TestQueueClaimIsExclusive(t *testing.T) {
 	var claimed atomic.Int32
 	var wg sync.WaitGroup
 
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			if got, err := d.Claim(ctx, queue.Default); err == nil && got != nil {
 				claimed.Add(1)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -272,7 +270,7 @@ func TestQueueClaimIsExclusive(t *testing.T) {
 func TestQueueDelayedJobIsNotClaimedEarly(t *testing.T) {
 	_, client := server(t)
 	d := queueredis.New(client, "queue")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rec := &queue.Record{
 		Queue: queue.Default, Name: "redis.noop", Payload: "{}",
@@ -291,7 +289,7 @@ func TestQueueStaleReservationIsReclaimed(t *testing.T) {
 	_, client := server(t)
 	d := queueredis.New(client, "queue")
 	d.Timeout = 50 * time.Millisecond
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rec := &queue.Record{
 		Queue: queue.Default, Name: "redis.noop", Payload: "{}",
@@ -317,7 +315,7 @@ func TestQueueStaleReservationIsReclaimed(t *testing.T) {
 func TestQueueCompleteRemovesTheJob(t *testing.T) {
 	_, client := server(t)
 	d := queueredis.New(client, "queue")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rec := &queue.Record{
 		Queue: queue.Default, Name: "redis.noop", Payload: "{}",
@@ -342,7 +340,7 @@ func TestQueueCompleteRemovesTheJob(t *testing.T) {
 func TestQueueReleaseSchedulesARetry(t *testing.T) {
 	_, client := server(t)
 	d := queueredis.New(client, "queue")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rec := &queue.Record{
 		Queue: queue.Default, Name: "redis.noop", Payload: "{}",
@@ -367,7 +365,7 @@ func TestQueueReleaseSchedulesARetry(t *testing.T) {
 func TestQueueFailRecordsTheJob(t *testing.T) {
 	_, client := server(t)
 	d := queueredis.New(client, "queue")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rec := &queue.Record{
 		Queue: queue.Default, Name: "redis.noop", Payload: "{}",
@@ -397,7 +395,7 @@ func TestQueueFailRecordsTheJob(t *testing.T) {
 func TestQueuesAreIndependent(t *testing.T) {
 	_, client := server(t)
 	d := queueredis.New(client, "queue")
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_ = d.Push(ctx, &queue.Record{
 		Queue: "mail", Name: "redis.noop", Payload: "{}",

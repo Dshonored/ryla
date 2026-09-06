@@ -122,7 +122,7 @@ func TestScriptIsServed(t *testing.T) {
 }
 
 func TestEventStreamSendsBootID(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	req := httptest.NewRequest(http.MethodGet, EventPath, nil).WithContext(ctx)
 
 	rec := httptest.NewRecorder()
@@ -171,7 +171,7 @@ func TestLargeBodyIsInjectedOnce(t *testing.T) {
 	h := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = io.WriteString(w, "<html><body>")
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			_, _ = io.WriteString(w, "<p>chunk</p>")
 		}
 		_, _ = io.WriteString(w, "</body></html>")

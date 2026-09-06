@@ -98,15 +98,13 @@ func (w *Worker) Run(ctx context.Context) error {
 			continue
 		}
 
-		wg.Add(1)
-		go func(rec *Record) {
-			defer wg.Done()
+		wg.Go(func() {
 			defer func() { <-slots }()
 
 			// Detached from ctx so a job that has already started completes
 			// during shutdown rather than being cancelled halfway.
 			w.process(context.WithoutCancel(ctx), log, rec)
-		}(rec)
+		})
 	}
 }
 

@@ -1,10 +1,12 @@
 package mongo
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -75,13 +77,12 @@ func Registered() []Index {
 	mu.Lock()
 	defer mu.Unlock()
 
-	out := make([]Index, len(indexes))
-	copy(out, indexes)
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Collection != out[j].Collection {
-			return out[i].Collection < out[j].Collection
-		}
-		return out[i].describe() < out[j].describe()
+	out := slices.Clone(indexes)
+	slices.SortFunc(out, func(a, b Index) int {
+		return cmp.Or(
+			cmp.Compare(a.Collection, b.Collection),
+			cmp.Compare(a.describe(), b.describe()),
+		)
 	})
 	return out
 }
@@ -165,13 +166,7 @@ func (s *Syncer) Sync(ctx context.Context) error {
 		byCollection[idx.Collection] = append(byCollection[idx.Collection], idx.model())
 	}
 
-	names := make([]string, 0, len(byCollection))
-	for name := range byCollection {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(byCollection)) {
 		start := time.Now()
 
 		created, err := s.DB.Collection(name).Indexes().CreateMany(ctx, byCollection[name])
@@ -209,7 +204,7 @@ func (s *Syncer) Status(ctx context.Context) ([]Status, error) {
 	if err != nil {
 		return nil, err
 	}
-	sort.Strings(collections)
+	slices.Sort(collections)
 
 	var out []Status
 	for _, name := range collections {

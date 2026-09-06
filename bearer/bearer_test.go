@@ -1,7 +1,6 @@
 package bearer
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -36,7 +35,7 @@ func store(t *testing.T) *Store {
 func create(t *testing.T, s *Store, userID string, opts Options) Created {
 	t.Helper()
 
-	made, err := s.Create(context.Background(), userID, "test token", opts)
+	made, err := s.Create(t.Context(), userID, "test token", opts)
 	if err != nil {
 		t.Fatalf("create token: %v", err)
 	}
@@ -97,7 +96,7 @@ func TestAStolenRowIsNotAWorkingCredential(t *testing.T) {
 	}
 
 	for _, candidate := range stolen {
-		if _, err := s.Verify(context.Background(), candidate); !errors.Is(err, ErrInvalidToken) {
+		if _, err := s.Verify(t.Context(), candidate); !errors.Is(err, ErrInvalidToken) {
 			t.Errorf("a stolen row value %q was accepted, err = %v", candidate, err)
 		}
 	}
@@ -107,7 +106,7 @@ func TestVerifyAcceptsAFreshToken(t *testing.T) {
 	s := store(t)
 	made := create(t, s, "42", Options{})
 
-	tok, err := s.Verify(context.Background(), made.Plaintext)
+	tok, err := s.Verify(t.Context(), made.Plaintext)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -146,7 +145,7 @@ func TestWrongTokensAreRejected(t *testing.T) {
 
 	for name, candidate := range wrong {
 		t.Run(name, func(t *testing.T) {
-			if _, err := s.Verify(context.Background(), candidate); !errors.Is(err, ErrInvalidToken) {
+			if _, err := s.Verify(t.Context(), candidate); !errors.Is(err, ErrInvalidToken) {
 				t.Errorf("err = %v, want ErrInvalidToken", err)
 			}
 		})
@@ -167,13 +166,13 @@ func TestExpiredTokensAreRejected(t *testing.T) {
 		t.Fatalf("expire the token: %v", err)
 	}
 
-	if _, err := s.Verify(context.Background(), made.Plaintext); !errors.Is(err, ErrExpired) {
+	if _, err := s.Verify(t.Context(), made.Plaintext); !errors.Is(err, ErrExpired) {
 		t.Fatalf("err = %v, want ErrExpired", err)
 	}
 
 	// Still listed, because an owner who cannot see the expired token cannot
 	// work out why their integration stopped.
-	tokens, err := s.List(context.Background(), "42")
+	tokens, err := s.List(t.Context(), "42")
 	if err != nil || len(tokens) != 1 {
 		t.Fatalf("List = %d tokens, %v", len(tokens), err)
 	}
@@ -186,7 +185,7 @@ func TestATokenWithNoExpiryKeepsWorking(t *testing.T) {
 	if made.Token.ExpiresAt != nil {
 		t.Fatalf("ExpiresAt = %v, want nil", made.Token.ExpiresAt)
 	}
-	if _, err := s.Verify(context.Background(), made.Plaintext); err != nil {
+	if _, err := s.Verify(t.Context(), made.Plaintext); err != nil {
 		t.Errorf("Verify: %v", err)
 	}
 }
@@ -197,10 +196,10 @@ func TestRevokeEndsTheTokenImmediately(t *testing.T) {
 	s := store(t)
 	made := create(t, s, "42", Options{})
 
-	if err := s.Revoke(context.Background(), "42", made.Token.ID); err != nil {
+	if err := s.Revoke(t.Context(), "42", made.Token.ID); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
-	if _, err := s.Verify(context.Background(), made.Plaintext); !errors.Is(err, ErrInvalidToken) {
+	if _, err := s.Verify(t.Context(), made.Plaintext); !errors.Is(err, ErrInvalidToken) {
 		t.Errorf("a revoked token still verifies, err = %v", err)
 	}
 }
@@ -212,10 +211,10 @@ func TestRevokeIsScopedToTheOwner(t *testing.T) {
 	s := store(t)
 	victim := create(t, s, "42", Options{})
 
-	if err := s.Revoke(context.Background(), "99", victim.Token.ID); !errors.Is(err, ErrNotFound) {
+	if err := s.Revoke(t.Context(), "99", victim.Token.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
-	if _, err := s.Verify(context.Background(), victim.Plaintext); err != nil {
+	if _, err := s.Verify(t.Context(), victim.Plaintext); err != nil {
 		t.Errorf("the owner's token was revoked by somebody else: %v", err)
 	}
 }
@@ -228,7 +227,7 @@ func TestRevokeAllEndsEveryToken(t *testing.T) {
 	second := create(t, s, "42", Options{})
 	other := create(t, s, "99", Options{})
 
-	n, err := s.RevokeAll(context.Background(), "42")
+	n, err := s.RevokeAll(t.Context(), "42")
 	if err != nil {
 		t.Fatalf("RevokeAll: %v", err)
 	}
@@ -237,11 +236,11 @@ func TestRevokeAllEndsEveryToken(t *testing.T) {
 	}
 
 	for _, made := range []Created{first, second} {
-		if _, err := s.Verify(context.Background(), made.Plaintext); !errors.Is(err, ErrInvalidToken) {
+		if _, err := s.Verify(t.Context(), made.Plaintext); !errors.Is(err, ErrInvalidToken) {
 			t.Errorf("a revoked token still verifies, err = %v", err)
 		}
 	}
-	if _, err := s.Verify(context.Background(), other.Plaintext); err != nil {
+	if _, err := s.Verify(t.Context(), other.Plaintext); err != nil {
 		t.Errorf("another user's token was caught up in the revoke: %v", err)
 	}
 }
@@ -258,7 +257,7 @@ func TestLastUsedAtIsRecordedButNotOnEveryRequest(t *testing.T) {
 		t.Fatalf("a token that has never been used has LastUsedAt = %v", made.Token.LastUsedAt)
 	}
 
-	first, err := s.Verify(context.Background(), made.Plaintext)
+	first, err := s.Verify(t.Context(), made.Plaintext)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -266,7 +265,7 @@ func TestLastUsedAtIsRecordedButNotOnEveryRequest(t *testing.T) {
 		t.Fatal("the first use was not recorded")
 	}
 
-	second, err := s.Verify(context.Background(), made.Plaintext)
+	second, err := s.Verify(t.Context(), made.Plaintext)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -282,7 +281,7 @@ func TestScopesRestrictWhatATokenMayDo(t *testing.T) {
 	s := store(t)
 	made := create(t, s, "42", Options{Scopes: []string{"posts:read", "posts:write"}})
 
-	tok, err := s.Verify(context.Background(), made.Plaintext)
+	tok, err := s.Verify(t.Context(), made.Plaintext)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -312,7 +311,7 @@ func TestAnUnscopedTokenIsUnrestricted(t *testing.T) {
 func TestAScopeContainingTheSeparatorIsRefused(t *testing.T) {
 	s := store(t)
 
-	_, err := s.Create(context.Background(), "42", "sneaky", Options{
+	_, err := s.Create(t.Context(), "42", "sneaky", Options{
 		Scopes: []string{"posts:read,billing:write"},
 	})
 	if err == nil {
@@ -333,14 +332,14 @@ func TestPruneRemovesOnlyExpiredTokens(t *testing.T) {
 		t.Fatalf("expire the token: %v", err)
 	}
 
-	n, err := s.Prune(context.Background())
+	n, err := s.Prune(t.Context())
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
 	}
 	if n != 1 {
 		t.Errorf("pruned %d tokens, want 1", n)
 	}
-	if _, err := s.Verify(context.Background(), permanent.Plaintext); err != nil {
+	if _, err := s.Verify(t.Context(), permanent.Plaintext); err != nil {
 		t.Errorf("a token with no expiry was pruned: %v", err)
 	}
 }
@@ -370,7 +369,7 @@ func TestListReturnsOnlyTheOwnersTokens(t *testing.T) {
 	create(t, s, "42", Options{})
 	create(t, s, "99", Options{})
 
-	tokens, err := s.List(context.Background(), "42")
+	tokens, err := s.List(t.Context(), "42")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}

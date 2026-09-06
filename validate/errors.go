@@ -2,8 +2,9 @@ package validate
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -40,14 +41,8 @@ func (b ErrorBag) First(field string) string {
 // All returns every message, sorted by field so the order is stable between
 // renders rather than following Go's random map iteration.
 func (b ErrorBag) All() []string {
-	fields := make([]string, 0, len(b))
-	for field := range b {
-		fields = append(fields, field)
-	}
-	sort.Strings(fields)
-
 	var out []string
-	for _, field := range fields {
+	for _, field := range slices.Sorted(maps.Keys(b)) {
 		out = append(out, b[field]...)
 	}
 	return out
@@ -55,12 +50,7 @@ func (b ErrorBag) All() []string {
 
 // Fields returns the failing field names, sorted.
 func (b ErrorBag) Fields() []string {
-	fields := make([]string, 0, len(b))
-	for field := range b {
-		fields = append(fields, field)
-	}
-	sort.Strings(fields)
-	return fields
+	return slices.Sorted(maps.Keys(b))
 }
 
 // Error makes ErrorBag usable as an error, for handlers that would rather

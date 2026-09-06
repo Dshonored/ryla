@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"time"
@@ -71,8 +72,7 @@ func (m *Memory) Get(_ context.Context, key string) ([]byte, bool, error) {
 
 	// A copy, so a caller mutating the slice cannot corrupt what the next
 	// reader sees.
-	out := make([]byte, len(e.value))
-	copy(out, e.value)
+	out := bytes.Clone(e.value)
 	return out, true, nil
 }
 
@@ -88,8 +88,7 @@ func (m *Memory) Set(_ context.Context, key string, value []byte, ttl time.Durat
 		expires = now.Add(ttl)
 	}
 
-	stored := make([]byte, len(value))
-	copy(stored, value)
+	stored := bytes.Clone(value)
 
 	m.entries[key] = entry{value: stored, expiresAt: expires, touched: now}
 	m.evict(now)

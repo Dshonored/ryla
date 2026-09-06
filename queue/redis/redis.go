@@ -114,7 +114,7 @@ type stored struct {
 	AvailableAt time.Time `json:"available_at"`
 	CreatedAt   time.Time `json:"created_at"`
 	LastError   string    `json:"last_error,omitempty"`
-	Attempts    int       `json:"attempts,omitempty"`
+	Attempts    int       `json:"attempts,omitzero"`
 }
 
 // Push implements queue.Driver.

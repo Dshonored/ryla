@@ -1,7 +1,6 @@
 package migrate
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -40,7 +39,7 @@ type widget struct {
 
 func TestUpAppliesAndIsIdempotent(t *testing.T) {
 	r := testRunner(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	Register("20260101000000_create_widgets",
 		func(tx *gorm.DB) error { return tx.AutoMigrate(&widget{}) },
@@ -70,7 +69,7 @@ func TestUpAppliesAndIsIdempotent(t *testing.T) {
 
 func TestRollbackUndoesLastBatchOnly(t *testing.T) {
 	r := testRunner(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	Register("20260101000000_a",
 		func(tx *gorm.DB) error { return tx.Exec("CREATE TABLE a (id integer)").Error },
@@ -107,7 +106,7 @@ func TestRollbackUndoesLastBatchOnly(t *testing.T) {
 
 func TestFailedMigrationIsNotRecorded(t *testing.T) {
 	r := testRunner(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	boom := errors.New("boom")
 	Register("20260101000000_ok",
@@ -138,7 +137,7 @@ func TestFailedMigrationIsNotRecorded(t *testing.T) {
 
 func TestStatusFlagsMigrationsMissingFromCode(t *testing.T) {
 	r := testRunner(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	Register("20260101000000_a",
 		func(tx *gorm.DB) error { return tx.Exec("CREATE TABLE a (id integer)").Error },
@@ -165,7 +164,7 @@ func TestStatusFlagsMigrationsMissingFromCode(t *testing.T) {
 
 func TestUpSteps(t *testing.T) {
 	r := testRunner(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, id := range []string{"20260101000000_a", "20260102000000_b", "20260103000000_c"} {
 		name := id[15:]

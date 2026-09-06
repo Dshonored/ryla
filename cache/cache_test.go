@@ -34,7 +34,7 @@ func stores(t *testing.T) map[string]Store {
 }
 
 func TestSetGetDelete(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for name, s := range stores(t) {
 		t.Run(name, func(t *testing.T) {
@@ -70,7 +70,7 @@ func TestSetGetDelete(t *testing.T) {
 }
 
 func TestExpiry(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for name, s := range stores(t) {
 		t.Run(name, func(t *testing.T) {
@@ -100,7 +100,7 @@ func TestExpiry(t *testing.T) {
 }
 
 func TestOverwrite(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for name, s := range stores(t) {
 		t.Run(name, func(t *testing.T) {
@@ -122,11 +122,11 @@ func TestOverwrite(t *testing.T) {
 }
 
 func TestClear(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for name, s := range stores(t) {
 		t.Run(name, func(t *testing.T) {
-			for i := 0; i < 3; i++ {
+			for i := range 3 {
 				if err := s.Set(ctx, fmt.Sprintf("k%d", i), []byte("v"), Forever); err != nil {
 					t.Fatal(err)
 				}
@@ -147,7 +147,7 @@ type profile struct {
 }
 
 func TestJSONRoundTrip(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := NewMemory()
 
 	want := profile{Name: "Alice", Views: 42}
@@ -169,7 +169,7 @@ func TestJSONRoundTrip(t *testing.T) {
 // was cached. Turning that into a permanent error would mean a deploy poisoning
 // every cached key until someone flushed it by hand.
 func TestUndecodableValueIsDropped(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := NewMemory()
 
 	if err := s.Set(ctx, "p", []byte(`"a string, not an object"`), Forever); err != nil {
@@ -190,7 +190,7 @@ func TestUndecodableValueIsDropped(t *testing.T) {
 }
 
 func TestRememberComputesOnceThenCaches(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := NewMemory()
 
 	var calls atomic.Int32
@@ -199,7 +199,7 @@ func TestRememberComputesOnceThenCaches(t *testing.T) {
 		return profile{Name: "Alice", Views: 1}, nil
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		got, err := Remember(ctx, s, "p", time.Minute, compute)
 		if err != nil {
 			t.Fatalf("Remember: %v", err)
@@ -218,7 +218,7 @@ func TestRememberComputesOnceThenCaches(t *testing.T) {
 // expiring must not mean every in-flight request recomputes it at once, which
 // is how a cache expiring takes the database down.
 func TestRememberCollapsesConcurrentMisses(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := NewMemory()
 
 	var calls atomic.Int32
@@ -230,14 +230,12 @@ func TestRememberCollapsesConcurrentMisses(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 20 {
+		wg.Go(func() {
 			if _, err := Remember(ctx, s, "stampede", time.Minute, compute); err != nil {
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -247,7 +245,7 @@ func TestRememberCollapsesConcurrentMisses(t *testing.T) {
 }
 
 func TestRememberPropagatesComputeErrors(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := NewMemory()
 	boom := errors.New("database down")
 
@@ -268,7 +266,7 @@ func TestRememberPropagatesComputeErrors(t *testing.T) {
 // TestRememberSurvivesABrokenStore is the promise the package makes: a cache is
 // an optimisation, so a broken one makes an application slow, not broken.
 func TestRememberSurvivesABrokenStore(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	got, err := Remember(ctx, brokenStore{}, "k", time.Minute, func(context.Context) (profile, error) {
 		return profile{Name: "computed anyway"}, nil
@@ -295,10 +293,10 @@ func (brokenStore) Clear(context.Context) error          { return errors.New("ca
 // TestMemoryEvictsWhenFull guards against the cache becoming a memory leak with
 // good intentions: keys derived from user input arrive without limit.
 func TestMemoryEvictsWhenFull(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	m := &Memory{MaxEntries: 10, entries: map[string]entry{}}
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		if err := m.Set(ctx, fmt.Sprintf("k%d", i), []byte("v"), Forever); err != nil {
 			t.Fatal(err)
 		}
@@ -310,7 +308,7 @@ func TestMemoryEvictsWhenFull(t *testing.T) {
 }
 
 func TestMemoryEvictsExpiredFirst(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	m := &Memory{MaxEntries: 3, entries: map[string]entry{}}
 
 	// Two that are already dead, then fill past the limit.
@@ -332,7 +330,7 @@ func TestMemoryEvictsExpiredFirst(t *testing.T) {
 }
 
 func TestMemoryReturnsACopy(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	m := NewMemory()
 
 	_ = m.Set(ctx, "k", []byte("original"), Forever)
@@ -351,7 +349,7 @@ func TestMemoryReturnsACopy(t *testing.T) {
 func TestJitterStaysWithinBounds(t *testing.T) {
 	base := time.Minute
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		got := Jitter(base, 0.2)
 		if got < base || got > base+12*time.Second {
 			t.Fatalf("Jitter = %v, want between 60s and 72s", got)
@@ -364,7 +362,7 @@ func TestJitterStaysWithinBounds(t *testing.T) {
 }
 
 func TestDBPrune(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := stores(t)["db"].(*DB)
 
 	_ = s.Set(ctx, "gone", []byte("v"), time.Nanosecond)

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -340,12 +341,7 @@ func ignored(root, path string, ignores []string) bool {
 // hasSegment reports whether a slash-separated path contains name as one of its
 // segments.
 func hasSegment(rel, name string) bool {
-	for _, part := range strings.Split(rel, "/") {
-		if part == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Split(rel, "/"), name)
 }
 
 // countWatched counts the source files the watcher is responsible for, purely

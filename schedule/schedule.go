@@ -10,11 +10,12 @@
 package schedule
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 )
@@ -98,9 +99,8 @@ func (s *Scheduler) Tasks() []*Task {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	out := make([]*Task, len(s.tasks))
-	copy(out, s.tasks)
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	out := slices.Clone(s.tasks)
+	slices.SortFunc(out, func(a, b *Task) int { return cmp.Compare(a.Name, b.Name) })
 	return out
 }
 
@@ -143,13 +143,11 @@ func (s *Scheduler) Run(ctx context.Context, tick time.Duration) error {
 					continue
 				}
 
-				wg.Add(1)
-				go func(t *Task) {
-					defer wg.Done()
+				wg.Go(func() {
 					// Detached from ctx so a task already started finishes
 					// during shutdown rather than being cancelled halfway.
 					s.run(context.WithoutCancel(ctx), t)
-				}(t)
+				})
 			}
 		}
 	}
@@ -170,11 +168,9 @@ func (s *Scheduler) RunOnce(ctx context.Context) error {
 			continue
 		}
 
-		wg.Add(1)
-		go func(t *Task) {
-			defer wg.Done()
+		wg.Go(func() {
 			s.run(ctx, t)
-		}(t)
+		})
 	}
 	wg.Wait()
 	return nil

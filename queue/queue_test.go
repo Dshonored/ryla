@@ -93,7 +93,7 @@ func TestDispatchAndRun(t *testing.T) {
 	runs.greeted = nil
 	runs.Unlock()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	disp := NewDispatcher(d)
 	if err := disp.Dispatch(ctx, &greet{To: "alice"}); err != nil {
 		t.Fatalf("Dispatch: %v", err)
@@ -124,7 +124,7 @@ func TestDispatchRejectsUnregisteredJobs(t *testing.T) {
 
 	// Better to fail at dispatch than to write a row no worker can ever run,
 	// and discover it days later.
-	err := NewDispatcher(d).Dispatch(context.Background(), &greet{To: "alice"})
+	err := NewDispatcher(d).Dispatch(t.Context(), &greet{To: "alice"})
 	if !errors.Is(err, ErrUnknownJob) {
 		t.Errorf("Dispatch of an unregistered job = %v, want ErrUnknownJob", err)
 	}
@@ -148,7 +148,7 @@ func TestDelayedJobIsNotClaimedEarly(t *testing.T) {
 	d := testDriver(t)
 	Register(func() Job { return &greet{} })
 
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := NewDispatcher(d).DispatchIn(ctx, &greet{To: "later"}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestJobsGoToTheirOwnQueue(t *testing.T) {
 	d := testDriver(t)
 	Register(func() Job { return &onOwnQueue{} })
 
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := NewDispatcher(d).Dispatch(ctx, &onOwnQueue{}); err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestClaimIsExclusive(t *testing.T) {
 	d := testDriver(t)
 	Register(func() Job { return &greet{} })
 
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := NewDispatcher(d).Dispatch(ctx, &greet{To: "once"}); err != nil {
 		t.Fatal(err)
 	}
@@ -202,14 +202,12 @@ func TestClaimIsExclusive(t *testing.T) {
 	var claimed atomic.Int32
 	var wg sync.WaitGroup
 
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			if rec, err := d.Claim(ctx, Default); err == nil && rec != nil {
 				claimed.Add(1)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -223,7 +221,7 @@ func TestWorkerRetriesThenFails(t *testing.T) {
 	Register(func() Job { return &boom{} })
 	boomAttempts.Store(0)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 
 	if err := NewDispatcher(d).Dispatch(ctx, &boom{}); err != nil {
@@ -274,7 +272,7 @@ func TestPanicDoesNotKillTheWorker(t *testing.T) {
 	runs.greeted = nil
 	runs.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 
 	disp := NewDispatcher(d)
@@ -312,7 +310,7 @@ func TestStaleReservationIsReclaimed(t *testing.T) {
 	d.Timeout = 50 * time.Millisecond
 	Register(func() Job { return &greet{} })
 
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := NewDispatcher(d).Dispatch(ctx, &greet{To: "stuck"}); err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +337,7 @@ func TestFailedJobCanBeRetried(t *testing.T) {
 	d := testDriver(t)
 	Register(func() Job { return &greet{} })
 
-	ctx := context.Background()
+	ctx := t.Context()
 	rec := &Record{
 		Queue: Default, Name: "test.greet", Payload: `{"to":"alice"}`,
 		Attempts: 3, MaxAttempts: 3, AvailableAt: time.Now(), CreatedAt: time.Now(),
@@ -379,8 +377,8 @@ func TestPending(t *testing.T) {
 	d := testDriver(t)
 	Register(func() Job { return &greet{} })
 
-	ctx := context.Background()
-	for i := 0; i < 3; i++ {
+	ctx := t.Context()
+	for range 3 {
 		if err := NewDispatcher(d).Dispatch(ctx, &greet{To: "x"}); err != nil {
 			t.Fatal(err)
 		}
