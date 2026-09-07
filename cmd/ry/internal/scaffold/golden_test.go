@@ -87,7 +87,7 @@ func languagesFor(web scaffold.WebMode) []string {
 
 func generateAndBuild(t *testing.T, root, db, web, lang, css string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	dir := filepath.Join(t.TempDir(), "demo")
 
@@ -250,7 +250,7 @@ func TestAuthScaffoldCompiles(t *testing.T) {
 func buildAuthProject(t *testing.T, database, web string) {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	root := repoRoot(t)
 	dir := filepath.Join(t.TempDir(), "demo")
 

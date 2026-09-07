@@ -1,7 +1,6 @@
 package mail
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"mime"
@@ -244,7 +243,7 @@ func TestRecipientsIncludesEveryGroup(t *testing.T) {
 
 func TestMemoryMailerRecordsMessages(t *testing.T) {
 	m := NewMemory()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if err := m.Send(ctx, basic()); err != nil {
 		t.Fatalf("Send: %v", err)
@@ -271,7 +270,7 @@ func TestMemoryMailerRejectsInvalidMessages(t *testing.T) {
 
 	// A test that silently records an unsendable message would pass while the
 	// real mailer failed.
-	if err := m.Send(context.Background(), Message{}); err == nil {
+	if err := m.Send(t.Context(), Message{}); err == nil {
 		t.Error("an invalid message was accepted")
 	}
 }
@@ -280,7 +279,7 @@ func TestLogMailerDoesNotSend(t *testing.T) {
 	var buf strings.Builder
 	m := NewLog(slog.New(slog.NewTextHandler(&buf, nil)))
 
-	if err := m.Send(context.Background(), basic()); err != nil {
+	if err := m.Send(t.Context(), basic()); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
 
@@ -327,7 +326,7 @@ func TestQueuedMailerValidatesBeforeQueueing(t *testing.T) {
 	// A malformed address discovered five retries later, in a log nobody is
 	// reading, is much worse than an error returned to the code that built it.
 	q := &Queued{}
-	if err := q.Send(context.Background(), Message{}); err == nil {
+	if err := q.Send(t.Context(), Message{}); err == nil {
 		t.Error("an invalid message was queued")
 	}
 }
@@ -355,7 +354,7 @@ func TestSendJobWithoutAMailerFails(t *testing.T) {
 	sender = nil
 	j := &SendJob{Message: basic()}
 
-	if err := j.Run(context.Background()); err == nil {
+	if err := j.Run(t.Context()); err == nil {
 		t.Error("the job ran with no mailer registered")
 	}
 }

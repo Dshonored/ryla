@@ -16,7 +16,6 @@
 package tests
 
 import (
-	"context"
 	"os"
 	"sync"
 	"testing"
@@ -64,7 +63,7 @@ func application(t *testing.T) *app.App {
 			t.Fatalf("build the application: %v", err)
 		}
 
-		ctx := context.Background()
+		ctx := t.Context()
 		if err := a.DB.Drop(ctx); err != nil {
 			t.Fatalf("drop the test database: %v", err)
 		}

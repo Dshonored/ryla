@@ -13,8 +13,10 @@
 package migrate
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -60,12 +62,8 @@ func Registered() []Migration {
 	mu.Lock()
 	defer mu.Unlock()
 
-	out := make([]Migration, 0, len(registered))
-	for _, m := range registered {
-		out = append(out, m)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	return slices.SortedFunc(maps.Values(registered),
+		func(a, b Migration) int { return cmp.Compare(a.ID, b.ID) })
 }
 
 // reset clears the registry. Tests only.

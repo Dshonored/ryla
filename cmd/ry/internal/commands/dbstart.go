@@ -222,8 +222,8 @@ func dsnHost(db scaffold.Database, dsn string) string {
 // hostOnly drops a trailing :port, leaving an IPv6 literal intact.
 func hostOnly(addr string) string {
 	if strings.HasPrefix(addr, "[") {
-		if end := strings.Index(addr, "]"); end >= 0 {
-			return addr[1:end]
+		if host, _, found := strings.Cut(addr[1:], "]"); found {
+			return host
 		}
 		return addr
 	}

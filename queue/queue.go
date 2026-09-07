@@ -14,7 +14,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 )
@@ -62,14 +63,8 @@ const DefaultMaxAttempts = 3
 // at ten minutes. Retrying a failing dependency every second only adds load to
 // something already struggling.
 func DefaultBackoff(attempt int) time.Duration {
-	if attempt < 1 {
-		attempt = 1
-	}
-	d := time.Duration(attempt*attempt) * 10 * time.Second
-	if d > 10*time.Minute {
-		return 10 * time.Minute
-	}
-	return d
+	attempt = max(attempt, 1)
+	return min(time.Duration(attempt*attempt)*10*time.Second, 10*time.Minute)
 }
 
 var (
@@ -127,12 +122,7 @@ func Registered() []string {
 	mu.RLock()
 	defer mu.RUnlock()
 
-	names := make([]string, 0, len(registry))
-	for name := range registry {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return slices.Sorted(maps.Keys(registry))
 }
 
 // reset clears the registry. Tests only.

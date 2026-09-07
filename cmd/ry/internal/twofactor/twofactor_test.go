@@ -56,7 +56,7 @@ func TestTwoFactorScaffoldCompiles(t *testing.T) {
 func buildTwoFactorProject(t *testing.T, database, web string) {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	root := repoRoot(t)
 	dir := filepath.Join(t.TempDir(), "demo")
 

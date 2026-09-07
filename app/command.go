@@ -1,12 +1,13 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/signal"
-	"sort"
+	"slices"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -78,9 +79,8 @@ func (c Commands) printUsage(w *os.File) {
 
 	fmt.Fprintf(w, "Usage: %s <command> [flags]\n\nCommands:\n", name)
 
-	sorted := make(Commands, len(c))
-	copy(sorted, c)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+	sorted := slices.Clone(c)
+	slices.SortFunc(sorted, func(a, b Command) int { return cmp.Compare(a.Name, b.Name) })
 
 	tw := tabwriter.NewWriter(w, 0, 0, 3, ' ', 0)
 	for _, cmd := range sorted {

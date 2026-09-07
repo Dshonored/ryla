@@ -224,7 +224,7 @@ func TestOversizedSessionIsRejected(t *testing.T) {
 	rec := serve(t, store, httptest.NewRequest(http.MethodGet, "/", nil),
 		func(w http.ResponseWriter, r *http.Request) {
 			s := From(r.Context())
-			for i := 0; i < 50; i++ {
+			for i := range 50 {
 				s.Put(string(rune('a'+i%26))+"key", "some reasonably long value here")
 			}
 		})

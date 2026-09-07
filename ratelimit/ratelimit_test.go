@@ -37,7 +37,7 @@ func TestTokensRefillOverTime(t *testing.T) {
 	// 10 per second, so a token returns every 100ms.
 	l := New(10, time.Second)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		l.Allow("key")
 	}
 	if ok, _ := l.Allow("key"); ok {
@@ -194,7 +194,7 @@ func TestCustomKeyFunc(t *testing.T) {
 func TestStaleKeysAreDiscarded(t *testing.T) {
 	l := New(5, 20*time.Millisecond)
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		l.Allow("key-" + strconv.Itoa(i))
 	}
 	if l.Len() < 100 {

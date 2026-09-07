@@ -22,7 +22,7 @@ func TestEveryRunsOnItsInterval(t *testing.T) {
 		return nil
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 600*time.Millisecond)
 	defer cancel()
 
 	if err := s.Run(ctx, 20*time.Millisecond); err != nil {
@@ -48,7 +48,7 @@ func TestNothingFiresImmediatelyOnStart(t *testing.T) {
 		return nil
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Millisecond)
 	defer cancel()
 	_ = s.Run(ctx, 10*time.Millisecond)
 
@@ -76,7 +76,7 @@ func TestOverlapIsPreventedByDefault(t *testing.T) {
 		return nil
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	_ = s.Run(ctx, 10*time.Millisecond)
 
@@ -103,7 +103,7 @@ func TestOverlapCanBeAllowed(t *testing.T) {
 	})
 	task.AllowOverlap = true
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	_ = s.Run(ctx, 5*time.Millisecond)
 
@@ -126,7 +126,7 @@ func TestPanicDoesNotStopTheScheduler(t *testing.T) {
 		return nil
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	_ = s.Run(ctx, 20*time.Millisecond)
 
@@ -144,7 +144,7 @@ func TestFailingTaskKeepsRunning(t *testing.T) {
 		return errors.New("nope")
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	_ = s.Run(ctx, 20*time.Millisecond)
 
@@ -165,7 +165,7 @@ func TestRunOnceRunsDueTasksAndReturns(t *testing.T) {
 
 	// RunOnce is what a system cron calls; it must not care that the interval
 	// has not elapsed within this process.
-	if err := s.RunOnce(context.Background()); err != nil {
+	if err := s.RunOnce(t.Context()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
 	if n := runs.Load(); n != 1 {
@@ -251,7 +251,7 @@ func TestShutdownWaitsForRunningTasks(t *testing.T) {
 		return nil
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
 		_ = s.Run(ctx, 5*time.Millisecond)

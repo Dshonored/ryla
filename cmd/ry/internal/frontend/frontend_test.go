@@ -2,7 +2,6 @@ package frontend
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"net"
@@ -64,7 +63,7 @@ func TestAMissingNodeIsASentinelError(t *testing.T) {
 	// An empty PATH is the only honest way to simulate a machine without Node.
 	t.Setenv("PATH", "")
 
-	err := Ensure(context.Background(), p, io.Discard)
+	err := Ensure(t.Context(), p, io.Discard)
 	if !errors.Is(err, ErrNodeMissing) {
 		t.Fatalf("Ensure error = %v, want ErrNodeMissing", err)
 	}
@@ -80,7 +79,7 @@ func TestAMissingNodeIsASentinelError(t *testing.T) {
 func TestAMissingPackageJSONNamesTheSetting(t *testing.T) {
 	p := newProject(t)
 
-	err := Ensure(context.Background(), p, io.Discard)
+	err := Ensure(t.Context(), p, io.Discard)
 	if err == nil {
 		t.Fatal("Ensure should fail when there is no package.json")
 	}

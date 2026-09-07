@@ -35,7 +35,7 @@ func TestDatabaseFromURI(t *testing.T) {
 }
 
 func TestOpenRequiresAURI(t *testing.T) {
-	if _, _, err := Open(context.Background(), Config{}); err == nil {
+	if _, _, err := Open(t.Context(), Config{}); err == nil {
 		t.Error("Open with no URI was accepted")
 	}
 }
@@ -226,7 +226,7 @@ func live(t *testing.T) *driver.Database {
 		t.Skip("skipping: set MONGO_TEST_URI to run the MongoDB integration tests")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	client, db, err := Open(ctx, Config{URI: uri, Database: "ryla_test"})
@@ -248,7 +248,7 @@ func live(t *testing.T) *driver.Database {
 
 func TestLiveCRUD(t *testing.T) {
 	db := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	people := For[person](db, "people")
 
 	alice := person{Name: "Alice", Email: "alice@example.com", Age: 30}
@@ -289,7 +289,7 @@ func TestLiveCRUD(t *testing.T) {
 
 func TestLiveFindWithQuery(t *testing.T) {
 	db := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	people := For[person](db, "people")
 
 	for i, name := range []string{"Alice", "Bob", "Carol"} {
@@ -330,7 +330,7 @@ func TestLiveFindWithQuery(t *testing.T) {
 // both pass an application-level check.
 func TestLiveUniqueIndexRejectsDuplicates(t *testing.T) {
 	db := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	reset()
 	t.Cleanup(reset)
@@ -362,7 +362,7 @@ func TestLiveUniqueIndexRejectsDuplicates(t *testing.T) {
 
 func TestLiveSyncIsIdempotent(t *testing.T) {
 	db := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	reset()
 	t.Cleanup(reset)
@@ -372,7 +372,7 @@ func TestLiveSyncIsIdempotent(t *testing.T) {
 
 	// Applying the declared state repeatedly has to be a no-op, because it runs
 	// on every deploy.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := s.Sync(ctx); err != nil {
 			t.Fatalf("Sync %d: %v", i+1, err)
 		}

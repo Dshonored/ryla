@@ -67,7 +67,7 @@ func TestForgedCookieCostsNoQuery(t *testing.T) {
 func TestDestroyForUserRefusesAnEmptyID(t *testing.T) {
 	s := &Store{Jar: testJar(), TTL: time.Hour}
 
-	if err := s.DestroyForUser(context.Background(), ""); err == nil {
+	if err := s.DestroyForUser(t.Context(), ""); err == nil {
 		t.Error("an empty user id was accepted")
 	}
 }
@@ -135,7 +135,7 @@ func live(t *testing.T) *rylamongo.Database {
 		t.Skip("skipping: set MONGO_TEST_URI to run the MongoDB integration tests")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	// A database of its own, so these tests and any other package's cannot drop
@@ -180,7 +180,7 @@ func raw(t *testing.T, s *Store, id string) bson.M {
 	t.Helper()
 
 	var out bson.M
-	if err := s.Sessions.C.FindOne(context.Background(), bson.M{"_id": id}).Decode(&out); err != nil {
+	if err := s.Sessions.C.FindOne(t.Context(), bson.M{"_id": id}).Decode(&out); err != nil {
 		t.Fatalf("read document %q: %v", id, err)
 	}
 	return out
@@ -261,7 +261,7 @@ func TestLiveExpiredSessionIsNotLoaded(t *testing.T) {
 
 	// Load also clears up as it goes, so an expired session nobody returns to is
 	// the only work left for the TTL index.
-	n, err := s.Sessions.Count(context.Background(), rylamongo.Filter{"_id": sess.ID})
+	n, err := s.Sessions.Count(t.Context(), rylamongo.Filter{"_id": sess.ID})
 	if err != nil {
 		t.Fatalf("Count: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestLiveDestroyForUserEndsEverySessionOfThatUser(t *testing.T) {
 		held = append(held, next(save(t, s, sess)))
 	}
 
-	if err := s.DestroyForUser(context.Background(), "7"); err != nil {
+	if err := s.DestroyForUser(t.Context(), "7"); err != nil {
 		t.Fatalf("DestroyForUser: %v", err)
 	}
 
@@ -354,7 +354,7 @@ func TestLiveSavingTwiceUpdatesOneDocument(t *testing.T) {
 	sess.Put("step", "two")
 	rec := save(t, s, sess)
 
-	n, err := s.Sessions.Count(context.Background(), rylamongo.Filter{})
+	n, err := s.Sessions.Count(t.Context(), rylamongo.Filter{})
 	if err != nil {
 		t.Fatalf("Count: %v", err)
 	}
@@ -408,7 +408,7 @@ func TestLiveRegenerateStartsANewDocument(t *testing.T) {
 // sessions never being collected.
 func TestLiveIndexSyncCreatesTheDeclaredIndexes(t *testing.T) {
 	db := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	syncer := rylamongo.NewSyncer(db, quietLogger())
 	if err := syncer.Sync(ctx); err != nil {

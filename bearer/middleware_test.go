@@ -1,7 +1,6 @@
 package bearer
 
 import (
-	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -223,7 +222,7 @@ func TestScopesReachTheHandler(t *testing.T) {
 		t.Errorf("granted = %v, refused = %v, anonymous = %v", granted, refused, anonymous)
 	}
 
-	if Can(context.Background(), "posts:read") {
+	if Can(t.Context(), "posts:read") {
 		t.Error("a request with no token passed a scope check")
 	}
 }

@@ -123,7 +123,7 @@ func live(t *testing.T) *Driver {
 		t.Skip("skipping: set MONGO_TEST_URI to run the MongoDB integration tests")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	client, db, err := rylamongo.Open(ctx, rylamongo.Config{URI: uri, Database: "ryla_queue_test"})
@@ -155,7 +155,7 @@ func push(t *testing.T, d *Driver, q, name string) *queue.Record {
 		AvailableAt: time.Now(),
 		CreatedAt:   time.Now(),
 	}
-	if err := d.Push(context.Background(), rec); err != nil {
+	if err := d.Push(t.Context(), rec); err != nil {
 		t.Fatalf("Push: %v", err)
 	}
 	if rec.ID == 0 {
@@ -170,7 +170,7 @@ func push(t *testing.T, d *Driver, q, name string) *queue.Record {
 // card twice, and is worse than no queue at all.
 func TestLiveClaimIsExclusiveUnderContention(t *testing.T) {
 	d := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pushed := push(t, d, "contended", "job.once")
 
@@ -184,10 +184,8 @@ func TestLiveClaimIsExclusiveUnderContention(t *testing.T) {
 		fails   []error
 	)
 
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			<-start
 
 			rec, err := d.Claim(ctx, "contended")
@@ -201,7 +199,7 @@ func TestLiveClaimIsExclusiveUnderContention(t *testing.T) {
 			if rec != nil {
 				winners = append(winners, rec)
 			}
-		}()
+		})
 	}
 
 	close(start)
@@ -228,7 +226,7 @@ func TestLiveClaimIsExclusiveUnderContention(t *testing.T) {
 // or a delayed retry runs immediately and defeats the backoff.
 func TestLiveClaimTakesTheOldestDueJobAndNothingElse(t *testing.T) {
 	d := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	first := push(t, d, queue.Default, "job.first")
 	second := push(t, d, queue.Default, "job.second")
@@ -270,7 +268,7 @@ func TestLiveClaimTakesTheOldestDueJobAndNothingElse(t *testing.T) {
 // work on one queue must not be picked up by a worker draining another.
 func TestLiveClaimIgnoresOtherQueues(t *testing.T) {
 	d := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	push(t, d, "reports", "job.slow")
 
@@ -288,7 +286,7 @@ func TestLiveClaimIgnoresOtherQueues(t *testing.T) {
 func TestLiveAbandonedReservationIsReclaimed(t *testing.T) {
 	d := live(t)
 	d.Timeout = 100 * time.Millisecond
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pushed := push(t, d, queue.Default, "job.abandoned")
 
@@ -325,7 +323,7 @@ func TestLiveAbandonedReservationIsReclaimed(t *testing.T) {
 // back, but not before its backoff, and it carries why it failed.
 func TestLiveReleaseReschedulesWithItsReason(t *testing.T) {
 	d := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	push(t, d, queue.Default, "job.flaky")
 
@@ -365,7 +363,7 @@ func TestLiveReleaseReschedulesWithItsReason(t *testing.T) {
 // TestLiveCompleteRemovesTheJob checks a finished job cannot be claimed again.
 func TestLiveCompleteRemovesTheJob(t *testing.T) {
 	d := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	push(t, d, queue.Default, "job.done")
 
@@ -388,7 +386,7 @@ func TestLiveCompleteRemovesTheJob(t *testing.T) {
 // listed with its reason, and can be re-queued.
 func TestLiveFailKeepsTheJobAndRetryPutsItBack(t *testing.T) {
 	d := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	push(t, d, "mail", "job.doomed")
 
@@ -450,7 +448,7 @@ func TestLiveFailKeepsTheJobAndRetryPutsItBack(t *testing.T) {
 // and leave the job stuck.
 func TestLiveFailIsSafeToRepeat(t *testing.T) {
 	d := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	push(t, d, queue.Default, "job.doomed")
 
@@ -483,7 +481,7 @@ func TestLiveFailIsSafeToRepeat(t *testing.T) {
 func TestLiveRetryRejectsAnUnknownID(t *testing.T) {
 	d := live(t)
 
-	if err := d.Retry(context.Background(), 9999); err == nil {
+	if err := d.Retry(t.Context(), 9999); err == nil {
 		t.Error("Retry of a job that was never failed was accepted")
 	}
 }
@@ -492,7 +490,7 @@ func TestLiveRetryRejectsAnUnknownID(t *testing.T) {
 // decide whether to add workers.
 func TestLivePendingCountsOneQueue(t *testing.T) {
 	d := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	push(t, d, queue.Default, "job.a")
 	push(t, d, queue.Default, "job.b")
@@ -513,7 +511,7 @@ func TestLivePendingCountsOneQueue(t *testing.T) {
 // sharing an id would mean one overwriting the other.
 func TestLiveIDsAreNeverReused(t *testing.T) {
 	d := live(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	const pushes = 32
 
@@ -523,10 +521,8 @@ func TestLiveIDsAreNeverReused(t *testing.T) {
 		seen = map[uint]bool{}
 	)
 
-	for i := 0; i < pushes; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range pushes {
+		wg.Go(func() {
 
 			rec := &queue.Record{
 				Queue:       queue.Default,
@@ -546,7 +542,7 @@ func TestLiveIDsAreNeverReused(t *testing.T) {
 				t.Errorf("id %d was minted twice", rec.ID)
 			}
 			seen[rec.ID] = true
-		}()
+		})
 	}
 	wg.Wait()
 

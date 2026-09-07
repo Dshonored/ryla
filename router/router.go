@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -59,11 +60,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // order chi requires regardless of the order they were declared in.
 func (r *Router) applyTo(mux chi.Router) {
 	r.mu.Lock()
-	middleware := make([]Middleware, len(r.middleware))
-	copy(middleware, r.middleware)
+	middleware := slices.Clone(r.middleware)
 
-	ops := make([]func(chi.Router), len(r.ops))
-	copy(ops, r.ops)
+	ops := slices.Clone(r.ops)
 	r.mu.Unlock()
 
 	for _, mw := range middleware {
@@ -276,9 +275,7 @@ func fillPattern(pattern string, values map[string]string) (string, error) {
 		}
 
 		key := pattern[i+1 : end]
-		if colon := strings.IndexByte(key, ':'); colon >= 0 {
-			key = key[:colon]
-		}
+		key, _, _ = strings.Cut(key, ":")
 
 		v, ok := values[key]
 		if !ok {

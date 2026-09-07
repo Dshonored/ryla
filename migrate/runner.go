@@ -1,10 +1,11 @@
 package migrate
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
+	"slices"
 	"time"
 
 	"gorm.io/gorm"
@@ -170,7 +171,7 @@ func (r *Runner) Rollback(ctx context.Context, batches int) error {
 		}
 	}
 	// Reverse ID order: undo the newest change first.
-	sort.Slice(targets, func(i, j int) bool { return targets[i].ID > targets[j].ID })
+	slices.SortFunc(targets, func(a, b record) int { return cmp.Compare(b.ID, a.ID) })
 
 	byID := make(map[string]Migration)
 	for _, m := range Registered() {
@@ -252,6 +253,6 @@ func (r *Runner) Status(ctx context.Context) ([]Status, error) {
 		}
 	}
 
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	slices.SortFunc(out, func(a, b Status) int { return cmp.Compare(a.ID, b.ID) })
 	return out, nil
 }

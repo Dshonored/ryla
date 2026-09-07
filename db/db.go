@@ -4,6 +4,8 @@ package db
 import (
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"time"
 
 	"gorm.io/gorm"
@@ -40,11 +42,7 @@ func Register(driver string, d Dialector) { dialectors[driver] = d }
 
 // Drivers lists the registered driver names.
 func Drivers() []string {
-	out := make([]string, 0, len(dialectors))
-	for name := range dialectors {
-		out = append(out, name)
-	}
-	return out
+	return slices.Collect(maps.Keys(dialectors))
 }
 
 // Open connects to the database and applies pool settings.
